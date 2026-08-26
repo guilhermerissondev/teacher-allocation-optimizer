@@ -1,0 +1,11 @@
+# O MANIFESTO_RELEASE.json de cada versao guarda o SHA-256 de cada arquivo do
+# pacote. Qualquer conversao de fim de linha na clonagem mudaria esses bytes e
+# faria integridade_release.py --verificar falhar fora do Windows. O conteudo e
+# preservado byte a byte em todas as plataformas.
+* -text
+
+*.xlsx binary
+*.png  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
