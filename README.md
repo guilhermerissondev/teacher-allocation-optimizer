@@ -1,97 +1,119 @@
 # Teacher Allocation Optimizer
 
-**How to optimally assign hundreds of teachers to courses while respecting eligibility rules, workload limits, and institutional constraints?**
+<!-- TODO: descomentar quando o CI estiver ativo (Fase 1 do plano)
+![CI](https://github.com/guilhermehrsilva/teacher-allocation-optimizer/actions/workflows/ci.yml/badge.svg)
+-->
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-Full-stack optimization system that automates teacher-to-course allocation using CP-SAT (Constraint Programming), with data validation, audit trails, scenario simulation, and a web dashboard for operational monitoring.
+**How do you optimally assign hundreds of teachers to courses while respecting eligibility rules, workload limits, and institutional constraints?**
 
-This repository keeps **two released versions side by side**, so the evolution of the system is visible in the code, not only in a changelog.
+Full-stack optimization system that automates teacher-to-course allocation using CP-SAT constraint programming, with data validation, audit trails, scenario simulation, and a web dashboard for operational monitoring.
 
-## Key Highlights
+<!-- TODO: substituir por um GIF de 10-15s mostrando upload → validação → alocação → dashboard.
+     Grave com ScreenToGif (Windows). É o item de maior impacto deste README. -->
+<!-- ![Demo](docs/evidencias/demo.gif) -->
+
+<!-- TODO: publicar com dados sintéticos e adicionar aqui:
+**[▶ Live demo](https://...)** — sample spreadsheet included, no real data required.
+-->
+
+## Why this exists
+
+Teacher allocation in a large distance-learning operation was handled manually through spreadsheets: slow, hard to audit, and impossible to simulate alternatives. Each round required reconciling eligibility rules, workload caps, and institutional policy by hand.
+
+This system turns that into a reproducible pipeline — validate, solve, audit, simulate — where every allocation round is traceable and every policy change can be tested before it is adopted.
+
+<!-- TODO: preencher com números reais. Sem eles o projeto parece um exercício.
+| Metric | Before | After |
+|--------|--------|-------|
+| Time per allocation round | ? hours | ? minutes |
+| Teachers handled | — | ? |
+| Courses handled | — | ? |
+| Constraints enforced | manual | ? automated rules |
+-->
+
+## Key highlights
 
 | Feature | Detail |
 |---------|--------|
 | Solver | Google OR-Tools CP-SAT |
-| Approach | Constraint programming + lexicographic phases |
+| Approach | Constraint programming + GRASP metaheuristic |
 | Validation | Automated rule checking with inconsistency reports |
-| Scenarios | What-if policy simulations for decision support |
+| Scenarios | Isolated what-if engine for policy simulation |
+| Audit | Full traceability per round (JSON + XLSX) |
 | Interface | React + FastAPI web dashboard |
-| Audit | Full traceability per allocation round |
-| Demo data | Fully synthetic — no real people, courses, or institution |
+| Quality | Test suite, SBOM (CycloneDX), third-party license inventory |
 
 ## Stack
 
-`Python` · `OR-Tools (CP-SAT)` · `FastAPI` · `React` · `TypeScript` · `Vite` · `Pandas` · `SQLite`
+`Python 3.12` · `OR-Tools (CP-SAT)` · `FastAPI` · `React 19` · `TypeScript` · `Vite` · `Pandas` · `SQLite`
 
-## Versions
+## How it works
 
-| | [`vbeta1.0/`](vbeta1.0/) | [`vbeta2.0/`](vbeta2.0/) |
-|---|---|---|
-| Status | First production release | Current release |
-| Eligibility | Fixed: exact profile match | **User-selected at import**: exact profile, cluster with preferred profile, or pure cluster |
-| Validation contract | 2.2 | 2.3 — eligibility-aware, new informational code for cluster-only coverage |
-| Audit | Profile compatibility | Re-checks compatibility under the active criterion; new codes for out-of-cluster profile, divergent criterion, inconsistent adherence |
-| Output schema | 2 | 3 — `BASE_ELEGIBILIDADE` per assignment, criterion and exact-vs-cluster split in the summary |
-| Scenarios | Isolated secondary engine | Scenario inherits the base round's criterion; promotion requires matching criteria |
-| Backward compatibility | — | Previous rounds stay readable; criterion columns backfilled as exact-profile by automatic migration |
+1. **Upload** — institutional spreadsheet with teachers, courses, and constraints
+2. **Validate** — automated rule-checking flags inconsistencies before solving
+3. **Optimize** — CP-SAT solver finds optimal teacher-course assignments
+4. **Audit** — every round generates traceability reports
+5. **Simulate** — an isolated secondary engine runs alternative scenarios without touching the primary solver
+6. **Monitor** — web dashboard tracks execution and results
 
-The defaults did not change: running 2.0 with the exact-profile criterion reproduces 1.0 exactly. Both versions ship the same demo base, so the two can be compared from an identical input.
-
-Full release notes: [`vbeta2.0/docs/10_NOTAS_DA_VERSAO.md`](vbeta2.0/docs/10_NOTAS_DA_VERSAO.md).
+The two engines are deliberately separated: the scenario tab can never modify or silently replace the primary solver's published round.
 
 ## Architecture
 
 ```
-├── vbeta1.0/               # First production release package
-└── vbeta2.0/               # Current release package
-    ├── engines/primary/    # Main CP-SAT solver
-    ├── engines/scenarios/  # Isolated scenario solver
-    ├── backend/            # FastAPI, SQLite, orchestration
-    ├── frontend/           # React app + built dist/
-    ├── docs/               # Full documentation (10 chapters + glossary)
-    ├── exemplos/           # Synthetic demonstration bases
-    └── scripts/            # Install, test, release and anonymization tools
+├── engines/
+│   ├── primary/        # main solver, preserved and versioned
+│   └── scenarios/      # isolated what-if engine
+├── backend/            # FastAPI, orchestration, audit, security middleware
+├── frontend/           # React + TypeScript dashboard
+├── docs/               # executive, functional and technical documentation
+├── scripts/            # install, test and release tooling
+└── exemplos/           # synthetic sample data
 ```
 
-The engines are deliberately separated: the Scenarios tab never modifies or silently replaces the primary solver.
-
-## How It Works
-
-1. **Upload** — Spreadsheet with teachers, courses, and constraints; the eligibility criterion is chosen here
-2. **Validate** — Automated rule-checking flags inconsistencies before solving
-3. **Optimize** — CP-SAT solver finds optimal teacher-course assignments
-4. **Audit** — Every round generates traceability reports (JSON + XLSX)
-5. **Simulate** — Run alternative scenarios and compare policy impacts
-6. **Promote** — A scenario becomes the official reference only when guardrails approve
-
-## How to Run
+## Running locally
 
 ```bash
 git clone https://github.com/guilhermehrsilva/teacher-allocation-optimizer.git
-cd teacher-allocation-optimizer/vbeta2.0
+cd teacher-allocation-optimizer
+
+# Backend — Python 3.12 or 3.13, 64-bit
 pip install -r requirements.txt
+
+# Frontend — builds the dashboard the API serves
+pwsh scripts/construir_frontend.ps1
+
 python executar.py
 ```
 
-On Windows, `OPTIMAL.bat` checks dependencies and starts the app at `http://127.0.0.1:8000`. The frontend is pre-built; Node.js is only needed to rebuild the interface.
+The dashboard opens at `http://127.0.0.1:8000`. A synthetic sample spreadsheet is available in `exemplos/` — no real institutional data is required or included in this repository.
 
-Start the demo by uploading `vbeta2.0/exemplos/BASE_DEMONSTRACAO_ANONIMIZADA_M52.xlsx`.
+The build step needs Node.js 20.19+ or 22.12+ and runs once. The production bundle is not versioned, so a fresh clone builds it locally; `executar.py` refuses to start without it rather than serving a stale interface.
 
-## Verifying a Release
+<!-- TODO Fase 1: substituir por
+```bash
+docker compose up
+```
+-->
 
-Each version ships a `MANIFESTO_RELEASE.json` with the SHA-256 of every file:
+### Frontend development
 
 ```bash
-python ./scripts/integridade_release.py --verificar
+cd frontend && npm install && npm run dev
 ```
 
-## Data, Privacy and Security
-
-The demonstration bases in `exemplos/` are **entirely synthetic**. Personal identifiers (names, badge numbers, managers, coordinators, comments, links, document metadata) and the academic catalog itself (course and discipline codes and names, curricula) are invented and match no real person, course, or institution.
-
-What is preserved is the structure that makes the tool behave as it does in production — cluster, discipline profile, matrix, module, workloads and schedules — so the demo exercises the real eligibility and optimization logic. Verified: a round over the synthetic base reproduces the homologation metrics exactly (402 offers, 377 allocated, 25 unallocated, 222 teachers used, solver `OPTIMAL`, audit `APROVADO`).
-
-No real institutional data is present in this repository or its history. The application is designed for local use on `127.0.0.1`: it has no authentication and no TLS, and must not be exposed on a network. Real spreadsheets and results are written to the local data directory and never form part of the package — see [`vbeta2.0/docs/07_SEGURANCA_PRIVACIDADE.md`](vbeta2.0/docs/07_SEGURANCA_PRIVACIDADE.md).
+Requires Node.js 20.19+ or 22.12+. The production build is generated at release time and is not versioned.
 
 ## Documentation
 
-Start with [Visão executiva](vbeta2.0/docs/00_VISAO_EXECUTIVA.md) and [Instalação e operação](vbeta2.0/docs/06_INSTALACAO_E_OPERACAO.md). Business rules, architecture, solvers, API, interface, security, homologation and troubleshooting are detailed in [`vbeta2.0/docs/`](vbeta2.0/docs/). Documentation is in Portuguese.
+Full documentation lives in [`docs/`](docs/) — start with the [Operational Manual](docs/MANUAL_OPERACIONAL.md) for setup and usage, or the [executive overview](docs/00_VISAO_EXECUTIVA.md) for the business context (Portuguese). Business rules, architecture, solver design, API, security, and QA are documented separately.
+
+## Data privacy
+
+This repository contains **no real institutional data**. All examples are synthetic. Real datasets are kept outside the package by design — see [`docs/07_SEGURANCA_PRIVACIDADE.md`](docs/07_SEGURANCA_PRIVACIDADE.md).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

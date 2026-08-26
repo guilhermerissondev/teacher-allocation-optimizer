@@ -1,4 +1,52 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
+# Ambientes virtuais
+venv/
+.venv/
+env/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Bancos e dados locais
+*.db
+*.sqlite
+*.sqlite3
+data/*
+!data/.gitkeep
+!data/README.md
+
+# Dados institucionais — NUNCA versionar
+*.xlsx
+*.xls
+*.csv
+!exemplos/*.xlsx
+!exemplos/*.csv
+
+# Saídas de execução
+saidas/
+outputs/
+auditoria/
+*.log
+
+# Segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Sistema operacional / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
