@@ -37,7 +37,7 @@ antes executa `scripts\construir_frontend.ps1`.
 ## Arquitetura do pacote
 
 ```text
-vbeta1.0/
+vbeta2.0/
 ├── backend/              API FastAPI, SQLite e orquestração
 ├── frontend/             React/TypeScript e build pronto em dist/
 ├── engines/primary/      solver principal preservado
