@@ -7,6 +7,7 @@ if exist "%RAIZ%VERSION" set /p VERSAO=<"%RAIZ%VERSION"
 set "VENV_PYTHON=%RAIZ%.venv\Scripts\python.exe"
 set "VERIFICADOR=%RAIZ%scripts\verificar_dependencias.py"
 set "INSTALADOR=%RAIZ%scripts\instalar.ps1"
+set "CONSTRUTOR=%RAIZ%scripts\construir_frontend.ps1"
 title OPTIMAL - Ferramenta de Alocacao Docente v%VERSAO%
 echo.
 echo   ============================================
@@ -64,6 +65,25 @@ echo   [OK] Dependencias instaladas com sucesso.
 goto :iniciar
 
 :iniciar
+rem Um clone do repositorio nao traz frontend\dist: ele e artefato de
+rem build e fica fora do controle de versao. Sem ele o executar.py aborta com
+rem "Pacote incompleto", mensagem que nao diz o que fazer. A interface e
+rem compilada aqui na primeira execucao; o construtor tambem regera o manifesto
+rem de integridade, sem o que a verificacao acusaria divergencia em seguida.
+if exist "%RAIZ%frontend\dist\index.html" goto :executar
+echo.
+echo   A interface ainda nao foi compilada nesta copia. Isso acontece ao
+echo   clonar o repositorio, porque o resultado da compilacao nao e versionado.
+echo   Compilando agora. Leva alguns minutos e precisa de conexao.
+echo.
+if not exist "%CONSTRUTOR%" goto :construtor_ausente
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%CONSTRUTOR%"
+if errorlevel 1 goto :falha_construcao
+if not exist "%RAIZ%frontend\dist\index.html" goto :falha_construcao
+echo.
+echo   [OK] Interface compilada.
+
+:executar
 echo.
 echo   Iniciando a aplicacao...
 echo.
@@ -126,6 +146,25 @@ exit /b 1
 
 :verificador_ausente
 echo   [ERRO] Arquivo scripts\verificar_dependencias.py nao encontrado.
+echo   O pacote esta incompleto: obtenha novamente a versao completa do OPTIMAL.
+echo.
+pause
+exit /b 1
+
+:falha_construcao
+echo.
+echo   [ERRO] Nao foi possivel compilar a interface.
+echo   A compilacao precisa do Node.js 20.19+, 22.12+ ou superior. Ele serve
+echo   apenas para gerar a interface a partir do codigo-fonte: o pacote de
+echo   distribuicao ja vem compilado e roda somente com Python.
+echo   Baixe em https://nodejs.org/ e execute o OPTIMAL.bat novamente, ou rode
+echo   scripts\construir_frontend.ps1 para ver a mensagem completa.
+echo.
+pause
+exit /b 1
+
+:construtor_ausente
+echo   [ERRO] Arquivo scripts\construir_frontend.ps1 nao encontrado.
 echo   O pacote esta incompleto: obtenha novamente a versao completa do OPTIMAL.
 echo.
 pause

@@ -5,7 +5,7 @@
   "algoritmo": "SHA-256",
   "observacao": "Dados operacionais e o proprio manifesto nao integram a soma.",
   "total_arquivos": 191,
-  "total_bytes": 3159159,
+  "total_bytes": 3161113,
   "arquivos": [
     {
       "caminho": ".gitattributes",
@@ -824,13 +824,13 @@
     },
     {
       "caminho": "OPTIMAL.bat",
-      "bytes": 6128,
-      "sha256": "7523f7b05d85df556e68eb81aaf471a0ed0f71185a24d0af3e49811e1b7cbf77"
+      "bytes": 7826,
+      "sha256": "ddf09bb64c918aa9f409aa10c80867fff6ef25007aa3b82c921f14d92cc3e2b0"
     },
     {
       "caminho": "README.md",
-      "bytes": 3624,
-      "sha256": "d679580d0bf90e55bea772b4c3507b9567e5c75cca3c25679cb9584bb2b1d629"
+      "bytes": 3880,
+      "sha256": "615a33d060263512e7f4e2168d58b96c344d1166ae292d499349110433c0b7e1"
     },
     {
       "caminho": "requirements.lock",

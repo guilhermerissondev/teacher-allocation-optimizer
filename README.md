@@ -18,9 +18,12 @@ puro. O padrão continua sendo perfil da disciplina, idêntico à versão 1.0.
 Quem preferir os passos separados executa `scripts\instalar.ps1` uma única vez e
 depois `iniciar.ps1`.
 
-O frontend já está compilado. Node.js só é necessário para desenvolvimento da
-interface, não para executar a versão de apresentação. Para recompilar, use
-Node.js 20.19+ ou 22.12+.
+No pacote de distribuição o frontend já vem compilado e a aplicação roda
+somente com Python. Num clone deste repositório, não: `frontend/dist` é
+artefato de build e fica fora do controle de versão. Na primeira execução o
+`OPTIMAL.bat` compila a interface sozinho e regera o manifesto de integridade —
+isso exige Node.js 20.19+, 22.12+ ou superior instalado. Quem preferir compilar
+antes executa `scripts\construir_frontend.ps1`.
 
 ## Fluxo de uso
 
