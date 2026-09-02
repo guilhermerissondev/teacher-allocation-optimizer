@@ -21,9 +21,16 @@ export function profileLabel(job: Job) {
   return PROFILE_LABELS[job.profile] ?? job.profile;
 }
 
-export function formatAnalysisJobLabel(job: Job) {
-  const round = job.round ?? "Sem número de rodada";
-  // O critério entra no rótulo porque rodadas de métodos diferentes não são
-  // comparáveis entre si, e a seleção acontece por esta lista.
-  return `${jobContextLabel(job)} · Módulo ${job.module} · ${criterionLabel(job)} · ${profileLabel(job)} · ${round} · ${formatJobDate(job.created_at)} · ${job.filename}`;
+/**
+ * Rotulo curto da opcao no seletor de rodadas.
+ *
+ * Um lote gera uma rodada por modulo, identicas em criterio, perfil, data e
+ * arquivo; o que as separa e o modulo e o numero da rodada. Deixar so isso na
+ * opcao evita que o select corte justamente a parte que distingue as rodadas.
+ */
+export function formatRoundOptionLabel(job: Job) {
+  const round = job.round ?? "sem rodada";
+  const scope = job.kind === "SCENARIO" ? "Cenário · " : "";
+  const official = job.is_official ? "★ " : "";
+  return `${official}${scope}Módulo ${job.module} · ${round}`;
 }

@@ -1,7 +1,10 @@
 import type {
   AllocationPage,
+  BatchChangeResult,
+  BatchInspection,
   EligibilityCriterion,
   ExecutionProfile,
+  ModuleBatch,
   DashboardData,
   DashboardFilters,
   InsightsData,
@@ -11,6 +14,12 @@ import type {
   ScenarioChange,
   ScenarioPolicy,
   ScenarioComparison,
+  Study,
+  StudyBaseline,
+  StudyCatalog,
+  StudyComparison,
+  StudyModuleProjection,
+  StudyPremiseResult,
   Summary,
   UploadResult,
 } from "./types";
@@ -65,6 +74,50 @@ export async function createJob(
   });
 }
 
+/** Lê os módulos presentes em cada planilha antes de montar o lote. */
+export async function inspectBatchFiles(files: File[]): Promise<BatchInspection> {
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  return request<BatchInspection>("/api/batches/inspect", { method: "POST", body: form });
+}
+
+export async function createModuleBatch(
+  files: File[],
+  modules: number[],
+  options: {
+    name: string;
+    criterion: EligibilityCriterion;
+    profile: ExecutionProfile;
+    marginOffers: number | null;
+  },
+): Promise<ModuleBatch> {
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file));
+  form.append("modules", modules.join(","));
+  form.append("name", options.name);
+  form.append("criterion", options.criterion);
+  form.append("profile", options.profile);
+  if (options.profile === "MARGEM_ACEITA" && options.marginOffers) {
+    form.append("margin_offers", String(options.marginOffers));
+  }
+  return request<ModuleBatch>("/api/batches", { method: "POST", body: form });
+}
+
+export const listModuleBatches = () => request<ModuleBatch[]>("/api/batches");
+export const deleteModuleBatch = (batchId: string) =>
+  request<{ batch_id: string; deleted_rounds: number; deleted_scenarios: number; deleted_jobs: number; cleanup_pending: number }>(
+    `/api/batches/${batchId}`,
+    { method: "DELETE" },
+  );
+export const getModuleBatch = (batchId: string) =>
+  request<ModuleBatch>(`/api/batches/${batchId}`);
+export const runModuleBatch = (batchId: string, confirmWarnings: boolean) =>
+  request<ModuleBatch>(`/api/batches/${batchId}/runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm_warnings: confirmWarnings }),
+  });
+
 export const listJobs = () => request<Job[]>("/api/jobs");
 export const resetPrimaryJobs = (scope: "latest" | "all") =>
   request<{ deleted_rounds: number; deleted_scenarios: number }>(`/api/jobs/primary?scope=${scope}`, { method: "DELETE" });
@@ -101,16 +154,23 @@ export const createScenario = (
 });
 export const getScenarioCatalog = (scenarioId: string) =>
   request<ScenarioCatalog>(`/api/scenarios/${scenarioId}/catalog`);
-export const addScenarioChange = (
+/**
+ * Aplica a mesma premissa a várias entidades de uma vez.
+ *
+ * `new_value` define o mesmo valor para todos; `adjustment` soma horas à
+ * CH_LETIVA de cada docente, preservando as diferenças de carga entre eles.
+ */
+export const addScenarioChangesBatch = (
   scenarioId: string,
   payload: {
     change_type: string;
     entity_type: string;
-    row_number: number;
     field_name: string;
-    new_value: string | number;
+    row_numbers: number[];
+    new_value?: string | number;
+    adjustment?: number;
   },
-) => request<ScenarioChange>(`/api/scenarios/${scenarioId}/changes`, {
+) => request<BatchChangeResult>(`/api/scenarios/${scenarioId}/changes/batch`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(payload),
@@ -153,3 +213,65 @@ export function getAllocations(
 
 export const artifactUrl = (jobId: string, key: string) =>
   `/api/jobs/${jobId}/artifacts/${key}`;
+
+// ---------------------------------------------------------------------------
+// Estudo em lote
+// ---------------------------------------------------------------------------
+
+/** Lotes com rodada concluída, elegíveis como base de um estudo. */
+export const listStudyBaselines = () =>
+  request<StudyBaseline[]>("/api/studies/baselines");
+
+export const listStudies = () => request<Study[]>("/api/studies");
+
+export const getStudy = (studyId: string) =>
+  request<Study>(`/api/studies/${studyId}`);
+
+export const createStudy = (
+  batchId: string,
+  modules: number[],
+  name: string,
+  description: string,
+) => request<Study>("/api/studies", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ batch_id: batchId, modules, name, description }),
+});
+
+export const getStudyCatalog = (studyId: string) =>
+  request<StudyCatalog>(`/api/studies/${studyId}/catalog`);
+
+/** Reprojeta as premissas e devolve o efeito por módulo, sem executar nada. */
+export const getStudyProjection = (studyId: string) =>
+  request<{ modules: StudyModuleProjection[] }>(`/api/studies/${studyId}/projection`);
+
+export const addStudyPremise = (
+  studyId: string,
+  payload: {
+    premise_type: string;
+    target_type: string;
+    target_values: string[];
+    field_name: string;
+    new_value?: string | number;
+    adjustment?: number;
+  },
+) => request<StudyPremiseResult>(`/api/studies/${studyId}/premises`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(payload),
+});
+
+export const deleteStudyPremise = (studyId: string, premiseId: string) =>
+  request<void>(`/api/studies/${studyId}/premises/${premiseId}`, { method: "DELETE" });
+
+export const runStudy = (studyId: string) =>
+  request<Study>(`/api/studies/${studyId}/runs`, { method: "POST" });
+
+export const getStudyComparison = (studyId: string) =>
+  request<StudyComparison>(`/api/studies/${studyId}/comparison`);
+
+export const deleteStudy = (studyId: string) =>
+  request<{ study_id: string; deleted_scenarios: number }>(
+    `/api/studies/${studyId}`,
+    { method: "DELETE" },
+  );

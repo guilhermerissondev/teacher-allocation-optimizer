@@ -8,6 +8,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import sys
 import time
 import zipfile
 from contextlib import contextmanager
@@ -15,12 +16,18 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterator
 
+APP_ROOT = Path(__file__).resolve().parents[1]
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
 
-ROOT = Path(__file__).resolve().parents[1]
+from scripts import bloqueio_dados
+
+
+ROOT = APP_ROOT
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 BACKUP_SCHEMA_VERSION = 1
 MAX_BACKUP_FILES = 100_000
-IGNORED_NAMES = {".aplicacao.lock", "app.sqlite3-shm", "app.sqlite3-wal"}
+IGNORED_NAMES = {bloqueio_dados.LOCK_NAME, "app.sqlite3-shm", "app.sqlite3-wal"}
 PATH_COLUMNS = {
     "uploads": ("stored_path", "validation_path", "validation_csv_path"),
     "jobs": ("round_dir",),
@@ -59,78 +66,39 @@ def _replace_with_retry(source: Path, destination: Path) -> None:
             time.sleep(0.05 * (attempt + 1))
 
 
-def _process_is_running(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
-def _lock_owner(lock: Path) -> int:
-    try:
-        return int(lock.read_text(encoding="ascii").strip())
-    except (OSError, ValueError):
-        return -1
-
-
 def ensure_application_stopped(data_dir: Path) -> None:
-    lock = data_dir / ".aplicacao.lock"
-    if not lock.is_file():
-        return
-    pid = _lock_owner(lock)
-    if _process_is_running(pid):
+    """Recusa a operação enquanto a aplicação mantiver o diretório reservado.
+
+    Um arquivo de bloqueio deixado por um encerramento abrupto não conta: o
+    sistema operacional já devolveu a reserva junto com o processo dono.
+    """
+
+    pid = bloqueio_dados.owner_pid(data_dir)
+    if pid is not None:
         raise RuntimeError(
-            f"A aplicação ainda está usando este diretório de dados (PID {pid})."
+            "A aplicação ainda está usando este diretório de dados "
+            f"({bloqueio_dados.describe_owner(pid)})."
         )
 
 
 @contextmanager
 def _reserve_application_stopped(data_dir: Path) -> Iterator[None]:
-    """Reserva o mesmo lock exclusivo usado por ``DataDirectoryLock``."""
+    """Reserva o mesmo bloqueio exclusivo usado por ``DataDirectoryLock``."""
 
-    lock = data_dir / ".aplicacao.lock"
-    descriptor: int | None = None
-    owner = str(os.getpid())
-    for _ in range(2):
-        try:
-            descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            pid = _lock_owner(lock)
-            if _process_is_running(pid):
-                raise RuntimeError(
-                    f"A aplicação ainda está usando este diretório de dados (PID {pid})."
-                )
-            try:
-                lock.unlink()
-            except OSError as exc:
-                raise RuntimeError(
-                    "Não foi possível recuperar o bloqueio do diretório de dados."
-                ) from exc
-            continue
-        encoded_owner = owner.encode("ascii")
-        try:
-            if os.write(descriptor, encoded_owner) != len(encoded_owner):
-                raise OSError("Gravação incompleta do lock da aplicação.")
-            os.fsync(descriptor)
-        except Exception:
-            os.close(descriptor)
-            descriptor = None
-            lock.unlink(missing_ok=True)
-            raise
-        break
-    if descriptor is None:
-        raise RuntimeError("Não foi possível reservar o diretório de dados.")
+    reservation = bloqueio_dados.reserve(data_dir)
+    try:
+        reservation.__enter__()
+    except bloqueio_dados.LockBusy as exc:
+        raise RuntimeError(
+            "A aplicação ainda está usando este diretório de dados "
+            f"({bloqueio_dados.describe_owner(exc.pid)})."
+        ) from None
+    except bloqueio_dados.LockUnavailable as exc:
+        raise RuntimeError(f"Não foi possível reservar o diretório de dados. {exc}") from None
     try:
         yield
     finally:
-        os.close(descriptor)
-        if _lock_owner(lock) == os.getpid():
-            lock.unlink(missing_ok=True)
+        reservation.__exit__(None, None, None)
 
 
 @contextmanager

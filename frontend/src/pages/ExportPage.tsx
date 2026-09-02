@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { getDashboard, listAnalysisJobs } from "../api";
 import LoadingState from "../components/LoadingState";
 import StatusBadge from "../components/StatusBadge";
-import { formatAnalysisJobLabel, jobContextLabel } from "../jobPresentation";
+import RoundPicker from "../components/RoundPicker";
+import { jobContextLabel } from "../jobPresentation";
 import type { DashboardData, Job } from "../types";
+import { count, hours, percent } from "../numberFormat";
 
 export default function ExportPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -57,32 +59,26 @@ export default function ExportPage() {
           </p>
         </div>
         {jobs.length > 0 && (
-          <label className="context-select-label">
-            <span>Rodada ou cenário a exportar</span>
-            <select
-              value={selected}
-              onChange={(event) => setSelected(event.target.value)}
-              aria-label="Selecionar rodada ou cenário para exportação"
-            >
-              {jobs.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {formatAnalysisJobLabel(item)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <RoundPicker
+            label="Rodada ou cenário a exportar"
+            jobs={jobs}
+            value={selected}
+            onChange={setSelected}
+            ariaLabel="Selecionar rodada ou cenário para exportação"
+          />
         )}
       </header>
 
       {loading && <LoadingState title="Carregando pacotes de exportação..." description="Localizando planilhas consolidadas e manifestos de auditoria do algoritmo OPTIMAL." />}
-      {error && <div className="state-empty error"><p>{error}</p></div>}
+      {error && <div className="alert error" role="alert">{error}</div>}
 
       {!loading && !error && jobs.length === 0 && (
-        <div className="state-empty">
-          <h3>Nenhuma alocação concluída para exportar</h3>
-          <p>Realize o processamento de uma base na aba <strong>Processamento</strong> ou execute um cenário para liberar o download das planilhas oficiais.</p>
-          <a className="button" href="#/processamento">Ir para Processamento</a>
-        </div>
+        <section className="empty-state panel">
+          <span aria-hidden="true">▤</span>
+          <h2>Nenhuma alocação concluída para exportar</h2>
+          <p>Processe uma base ou execute um cenário para liberar o download das planilhas oficiais e do manifesto de auditoria.</p>
+          <a className="button primary" href="#/processamento">Ir para Processamento</a>
+        </section>
       )}
 
       {!loading && !error && selectedJob && (
@@ -144,7 +140,6 @@ export default function ExportPage() {
             <section className="export-summary-section">
               <div className="section-title">
                 <div>
-                  <span className="step-kicker">RESUMO DO CONTEÚDO</span>
                   <h2>Indicadores consolidados nesta exportação</h2>
                   <p>Dados exatos contidos na planilha que você está baixando.</p>
                 </div>
@@ -152,23 +147,23 @@ export default function ExportPage() {
               <div className="export-kpi-grid">
                 <div className="export-kpi-card highlight">
                   <span>Cobertura Geral</span>
-                  <strong>{dashboard.kpis.coverage_pct.toFixed(1)}%</strong>
-                  <small>{dashboard.kpis.allocated} alocadas de {dashboard.kpis.transmissions} transmissões</small>
+                  <strong>{percent(dashboard.kpis.coverage_pct)}</strong>
+                  <small>{count(dashboard.kpis.allocated)} alocadas de {count(dashboard.kpis.transmissions)} transmissões</small>
                 </div>
                 <div className="export-kpi-card">
                   <span>Corpo Docente Ativo</span>
-                  <strong>{dashboard.kpis.active_teachers} docentes</strong>
-                  <small>Capacidade letiva bruta: {dashboard.kpis.active_teaching_capacity_hours}h</small>
+                  <strong>{count(dashboard.kpis.active_teachers)} docentes</strong>
+                  <small>Capacidade letiva bruta: {hours(dashboard.kpis.active_teaching_capacity_hours)}</small>
                 </div>
                 <div className="export-kpi-card">
                   <span>Lacunas Remanescentes</span>
-                  <strong>{dashboard.kpis.unassigned} ofertas</strong>
+                  <strong>{count(dashboard.kpis.unassigned)} ofertas</strong>
                   <small>Detalhadas na aba "Não Alocadas" do Excel</small>
                 </div>
                 <div className="export-kpi-card">
                   <span>Taxa de Uso Docente</span>
-                  <strong>{dashboard.kpis.teacher_use_pct.toFixed(1)}%</strong>
-                  <small>{dashboard.kpis.used_teachers} docentes com alocação ativa</small>
+                  <strong>{percent(dashboard.kpis.teacher_use_pct)}</strong>
+                  <small>{count(dashboard.kpis.used_teachers)} docentes com alocação ativa</small>
                 </div>
               </div>
             </section>
@@ -178,7 +173,6 @@ export default function ExportPage() {
           <section className="audit-packages-section">
             <div className="section-title">
               <div>
-                <span className="step-kicker">GOVERNANÇA & AUDITORIA</span>
                 <h2>Pacotes Complementares de Conformidade</h2>
                 <p>Relatórios estruturados e arquivos de comprovação técnica para coordenações e comissões de avaliação.</p>
               </div>

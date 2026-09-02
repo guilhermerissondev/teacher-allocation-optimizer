@@ -10,13 +10,13 @@ O código revisado possui:
 
 | Camada | Testes definidos |
 |---|---:|
-| Motor principal | 68 |
-| Motor de cenários | 75 |
-| Backend | 22 |
-| Release, backup e restauração | 16 |
-| Frontend | nenhum teste automatizado dedicado |
+| Motor principal | 109 |
+| Motor de cenários | 116 |
+| Backend | 61 |
+| Release, backup e restauração | 42 |
+| Frontend | nenhum teste automatizado dedicado; `tsc --noEmit` cobre os tipos |
 
-São **181 testes Python** no total. A contagem não substitui o recibo de
+São **328 testes Python** no total. A contagem não substitui o recibo de
 execução: cada release precisa registrar data, ambiente, comando, quantidade
 aprovada e falhas.
 
@@ -29,6 +29,20 @@ Execução consolidada recomendada:
     .\scripts\testar.ps1
 
 O script executa backend, motor principal, motor de cenários, release/backup/restauração, verificação estrutural e, quando presente, MANIFESTO_RELEASE.json.
+
+### Verificação opcional da interface
+
+`testar.ps1` cobre tudo que é Python. O que ele não cobre é se a tela
+**desenha**: uma resposta da API sem um campo que o tipo prometia derruba a
+página inteira e passa por toda a suíte sem um arranhão — foi o que aconteceu
+uma vez no fluxo de lote.
+
+    node .\scriptserificar_interface.js --url http://127.0.0.1:8000
+
+Percorre as cinco abas e o fluxo de lote nos dois temas, reprovando em qualquer
+exceção de render. Fica **fora** do portão canônico de propósito: exige Node.js,
+o Chrome instalado e a aplicação em execução, e o release não deve depender
+disso. Rode-o antes de publicar uma mudança de interface.
 
 Motor principal:
 

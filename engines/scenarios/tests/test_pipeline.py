@@ -269,7 +269,7 @@ class PipelineTests(unittest.TestCase):
             {"first_stage": 4, "second_stage": 4},
             summary["allocated_stage_hours"],
         )
-        self.assertEqual(4, summary["average_weekly_allocated_hours"])
+        self.assertEqual(0, summary["teachers_over_capacity"])
         self.assertTrue((round_dir / "fonte" / source.name).is_file())
         allocation_path = round_dir / "alocacao" / "resultado_alocacao.xlsx"
         self.assertTrue(allocation_path.is_file())
@@ -294,14 +294,25 @@ class PipelineTests(unittest.TestCase):
             teacher_headers = [cell.value for cell in docentes[1]]
             teacher_values = next(docentes.iter_rows(min_row=2, values_only=True))
             teacher_row = dict(zip(teacher_headers, teacher_values))
-            self.assertEqual(17, len(teacher_headers))
+            self.assertEqual(26, len(teacher_headers))
             self.assertNotIn("MODELO_CONTRATO", teacher_headers)
+            # Uma disciplina de cada ordem: a ESTENDIDA soma nas duas etapas.
+            self.assertEqual(1, teacher_row["QTD_1ª_ORDEM"])
+            self.assertEqual(1, teacher_row["QTD_2ª_ORDEM"])
+            self.assertEqual(1, teacher_row["QTD_ESTENDIDA"])
             self.assertEqual(3, teacher_row["QTD_TRANSMISSÕES"])
             self.assertEqual(2, teacher_row["QTD_DISCIPLINAS_1ª_ETAPA"])
+            self.assertEqual(4, teacher_row["CH_ALOCADA_1ª_ETAPA"])
             self.assertEqual(1, teacher_row["UTILIZAÇÃO_1ª_ETAPA"])
             self.assertEqual(2, teacher_row["QTD_DISCIPLINAS_2ª_ETAPA"])
+            self.assertEqual(4, teacher_row["CH_ALOCADA_2ª_ETAPA"])
             self.assertEqual(1, teacher_row["UTILIZAÇÃO_2ª_ETAPA"])
-            self.assertEqual(1, teacher_row["UTILIZAÇÃO"])
+            # Cada metade consome 4h sobre uma CH_LETIVA semanal de 4h: o teto
+            # e respeitado nas duas, entao nao ha estouro.
+            self.assertEqual(4, teacher_row["CH_ALOCADA_PICO"])
+            self.assertEqual(0, teacher_row["CH_DISPONÍVEL"])
+            self.assertEqual(1, teacher_row["UTILIZAÇÃO_PICO"])
+            self.assertEqual("NAO", teacher_row["EXCEDE_CH_LETIVA"])
         finally:
             workbook.close()
 

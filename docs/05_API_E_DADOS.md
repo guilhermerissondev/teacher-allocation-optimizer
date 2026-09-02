@@ -29,6 +29,12 @@ Não há autenticação na vBeta 2.0. A API não deve ser exposta em rede.
 | GET | /api/jobs/{job_id}/artifacts/{artifact_key} | Baixar artefato |
 | GET | /api/dashboard/{job_id} | Gerar Dashboard filtrado |
 | GET | /api/insights/{job_id} | Gerar Insights |
+| POST | /api/batches/inspect | Ler os módulos presentes em cada planilha enviada |
+| POST | /api/batches | Criar lote: um upload validado por módulo escolhido |
+| GET | /api/batches | Listar lotes |
+| GET | /api/batches/{batch_id} | Consultar lote com progresso e KPIs por módulo |
+| POST | /api/batches/{batch_id}/runs | Enfileirar as rodadas dos módulos liberados |
+| DELETE | /api/batches/{batch_id} | Excluir o lote do histórico com as rodadas e cenários dele |
 
 ## Endpoints de Cenários
 
@@ -39,13 +45,75 @@ Não há autenticação na vBeta 2.0. A API não deve ser exposta em rede.
 | DELETE | /api/scenarios?scope=latest ou all | Excluir cenários |
 | GET | /api/scenarios/{scenario_id} | Consultar cenário |
 | GET | /api/scenarios/{scenario_id}/catalog | Listar ofertas, docentes, cursos e clusters da baseline |
-| POST | /api/scenarios/{scenario_id}/changes | Criar ou substituir alteração de campo |
+| POST | /api/scenarios/{scenario_id}/changes/batch | Aplicar a mesma alteração a várias linhas |
 | DELETE | /api/scenarios/{scenario_id}/changes/{change_id} | Remover alteração |
 | POST | /api/scenarios/{scenario_id}/policies | Criar ou substituir política |
 | DELETE | /api/scenarios/{scenario_id}/policies/{policy_id} | Remover política |
 | POST | /api/scenarios/{scenario_id}/runs | Executar simulação |
 | GET | /api/scenarios/{scenario_id}/comparison | Comparar cenário e baseline |
 | POST | /api/scenarios/{scenario_id}/promote | Homologar cenário |
+
+## Endpoints de Estudos em lote
+
+Um estudo aplica a mesma premissa a vários módulos do ano. Ele não executa nada
+por conta própria: projeta a premissa em um cenário filho por módulo e usa os
+mesmos endpoints de simulação, comparação e homologação de cenários.
+
+| Método | Rota | Finalidade |
+|---|---|---|
+| GET | /api/studies/baselines | Listar lotes com rodada concluída, elegíveis como base |
+| POST | /api/studies | Criar estudo sobre um lote e um conjunto de módulos |
+| GET | /api/studies | Listar estudos |
+| GET | /api/studies/{study_id} | Consultar estudo com o estado de cada módulo |
+| GET | /api/studies/{study_id}/catalog | Listar a base docente compartilhada pelos módulos |
+| GET | /api/studies/{study_id}/projection | Ver o efeito de cada premissa em cada módulo |
+| POST | /api/studies/{study_id}/premises | Criar premissa e reprojetar o estudo |
+| DELETE | /api/studies/{study_id}/premises/{premise_id} | Remover premissa e reprojetar |
+| POST | /api/studies/{study_id}/runs | Enfileirar a simulação de todos os módulos aptos |
+| GET | /api/studies/{study_id}/comparison | Comparar módulo a módulo, cada um com a sua baseline |
+| DELETE | /api/studies/{study_id} | Excluir o estudo e os cenários filhos |
+
+### Premissas do estudo
+
+O alvo é a chave de negócio, não a linha da planilha:
+
+| premise_type | target_type | field_name | Entidade |
+|---|---|---|---|
+| CAPACIDADE | TEACHER_BADGE | STATUS, CH_LETIVA | DOCENTES |
+| COMPATIBILIDADE | TEACHER_BADGE | PERFIL_DISCIPLINA | DOCENTES |
+| AGENDA | COURSE, DISCIPLINE | DIA_AULA, HORÁRIO, ORDEM | MAPA PEDAGÓGICO |
+
+`operation` é `SET` ou `ADJUST`, e `ADJUST` só se aplica a CH_LETIVA.
+
+`target_values` é uma lista: cada alvo vira uma premissa, até 100 por
+submissão e 50 por estudo. É o que permite mover três cursos de dia como uma
+única operação.
+
+A resposta da criação traz `study` e `projection`. A projeção informa, por
+módulo, quantas linhas cada premissa alcançou e o motivo quando não alcançou
+nenhuma — alvo ausente naquele módulo, valor já praticado ou CH acima do teto
+contratado.
+
+### Catálogo do estudo
+
+`GET /api/studies/{id}/catalog` devolve os alvos possíveis. Os docentes vêm de
+um módulo só, porque a base docente é comprovadamente idêntica entre eles.
+Cursos e disciplinas são agregados de todos os módulos e trazem, por módulo,
+quantas ofertas existem e quantas ficaram sem alocação na rodada-base — a
+contagem que identifica o curso que vive com disciplina sem docente. O bloco
+`practiced` lista os dias, horários e ordens efetivamente usados no ano.
+
+### Resultado desatualizado
+
+Cada módulo do estudo traz `stale`. Ele fica verdadeiro quando existe uma
+simulação concluída cujas alterações não correspondem mais às premissas atuais;
+nesse caso `kpis` vem nulo. Uma reprojeção que reescreve exatamente as mesmas
+alterações não invalida a simulação.
+
+### Homologação
+
+Não existe rota de homologação de estudo. Cada módulo é homologado pelo cenário
+filho, em `POST /api/scenarios/{scenario_id}/promote`, com os mesmos guardrails.
 
 ## Upload
 
@@ -70,6 +138,59 @@ Corpo:
     }
 
 APROVADO_COM_RESSALVAS exige confirm_warnings. REPROVADO não pode seguir.
+
+## Processamento em lote
+
+Um lote executa vários módulos em uma operação, sem alterar o motor: cada
+módulo vira uma rodada independente, validada e resolvida pelo mesmo pipeline.
+
+Dois formatos de entrada são aceitos:
+
+- **uma planilha por módulo** — o arquivo segue intacto para a validação;
+- **uma planilha com vários módulos** — a coluna `MÓD` separa o arquivo em uma
+  planilha por módulo antes da validação. `MAPA PEDAGÓGICO` fica só com as
+  linhas daquele módulo e `DOCENTES` é copiada inteira, porque a aba não tem
+  coluna de módulo e a capacidade é consumida dentro de cada módulo.
+
+Regras do lote:
+
+- cada módulo pedido precisa vir de exatamente uma planilha; duas origens para
+  o mesmo módulo são recusadas, para não misturar bases sem o operador ver;
+- um lote cobre no máximo `max_batch_modules` módulos (4 por padrão) e exige a
+  fila do motor principal vazia;
+- módulos reprovados na validação ficam registrados com o motivo e não são
+  enfileirados; os demais seguem normalmente;
+- ressalvas exigem confirmação explícita, como no envio individual;
+- as rodadas correm em série, e cada módulo publica o seu próprio resultado
+  oficial — o lote não cria um resultado combinado.
+
+### Exclusão de um lote
+
+`DELETE /api/batches/{batch_id}` remove o lote do histórico junto com o que ele
+produziu: as rodadas do lote, os cenários construídos sobre elas e os uploads
+que ficariam órfãos. Um upload ainda usado por outra rodada permanece.
+
+A operação segue a mesma cascata do reset de rodadas-base, com quarentena antes
+do commit e rollback se a remoção falhar no meio. Um lote com módulo na fila ou
+em execução é recusado com `409`; um lote inexistente devolve `404`.
+
+### Alteração de premissas nos Cenários
+
+`POST /api/scenarios/{id}/changes/batch` é a única porta para registrar
+alterações de campo. Ela aceita de 1 a 500 linhas, entrega os mesmos registros
+que a rota individual entregava e aplica a mesma validação de alvo, por isso a
+rota de linha única foi removida em vez de manter dois caminhos equivalentes.
+Dois modos:
+
+- `new_value` — o mesmo valor para todas as linhas selecionadas;
+- `adjustment` — soma horas à `CH_LETIVA` de cada docente, preservando as
+  diferenças de carga entre eles. Só se aplica a `CH_LETIVA`.
+
+A resposta separa `applied` de `skipped`, e toda linha ignorada traz o motivo.
+São ignoradas as linhas que já estão no valor pedido na rodada-base, as que
+ficariam com carga negativa e as que passariam da `CH_CONTRATADA` — esta
+última porque a validação reprova `CH_LETIVA` acima da contratada.
+
 
 ## Paginação
 
@@ -140,6 +261,23 @@ Mantém uma política por cenário, tipo, alvo e valor.
 
 Relaciona cenário, job, planilha materializada e snapshot de alterações.
 
+### scenario_studies
+
+Registra lote-base, nome, descrição, status e os módulos escolhidos. Excluir o
+lote exclui os estudos construídos sobre ele.
+
+### scenario_study_premises
+
+Mantém uma premissa por estudo, tipo, alvo e campo. O alvo é a chapa do docente,
+e não a linha da planilha: ao fatiar a base anual por módulo, a linha muda de
+lugar e a mesma premissa passaria a significar coisas diferentes em cada recorte.
+
+### scenario_study_modules
+
+Liga cada módulo do estudo à sua rodada-base e ao cenário filho projetado.
+Remover o cenário filho remove o módulo do estudo; um estudo sem módulos é
+descartado, porque já não descreve comparação alguma.
+
 ### official_results
 
 Mantém um resultado oficial por módulo.
@@ -191,7 +329,9 @@ CHAPA deve ser única. Cargas devem ser inteiros não negativos.
 
 ## Saída
 
-A planilha final inclui abas de ALOCACOES e DOCENTES. O resumo JSON contém métricas e decisões usadas pela API.
+A planilha final inclui abas de ALOCACOES, DOCENTES e DOCENTES POR CARGO. O resumo JSON contém métricas e decisões usadas pela API.
+
+DOCENTES POR CARGO é a abertura da utilização docente derivada de DOCENTES: cada cargo (NM_FUNCAO) abre nos regimes de contratação (T40, T20, T12..., com sufixo Mensalista no contrato Stricto) e a aba fecha em Total Geral. Traz headcount, CH contratada, CH letiva alocável, CH alocada e utilização por etapa e de pico. A CH letiva alocável é a soma da coluna `CH_LETIVA_ALOCÁVEL` da aba DOCENTES — a CH letiva arredondada para baixo ao múltiplo de uma transmissão —, e é ela que serve de denominador. Cargos sem CH letiva alocável registram NSA no lugar do percentual.
 
 Campos críticos da decisão:
 

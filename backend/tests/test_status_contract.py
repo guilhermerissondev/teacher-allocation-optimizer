@@ -23,7 +23,10 @@ from app.services.jobs import TERMINAL_STATES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATUS_BADGE = REPO_ROOT / "frontend" / "src" / "components" / "StatusBadge.tsx"
-PROCESS_PAGE = REPO_ROOT / "frontend" / "src" / "pages" / "ProcessPage.tsx"
+# As tabelas de etapa e as opções da importação são compartilhadas pelas duas
+# telas de processamento. Vigiar a fonte única evita que uma cópia divirja.
+JOB_STAGES = REPO_ROOT / "frontend" / "src" / "jobStages.ts"
+RUN_OPTIONS = REPO_ROOT / "frontend" / "src" / "components" / "RunOptions.tsx"
 
 # Estados que a própria tela trata sem tabela: um é o sucesso, o outro é a
 # interrupção do encerramento seguro, que não pertence a nenhuma etapa.
@@ -32,7 +35,7 @@ SELF_EVIDENT_STATES = {"CONCLUIDA", "INTERROMPIDA"}
 
 def _string_list(source: str, name: str) -> set[str]:
     """Extrai os literais de um ``const NOME = [...]`` do TypeScript."""
-    match = re.search(rf"const {name} = \[(.*?)\];", source, re.DOTALL)
+    match = re.search(rf"(?:export )?const {name} = \[(.*?)\];", source, re.DOTALL)
     if not match:
         raise AssertionError(f"Tabela {name} não encontrada na interface.")
     return set(re.findall(r'"([^"]+)"', match.group(1)))
@@ -41,7 +44,7 @@ def _string_list(source: str, name: str) -> set[str]:
 def _record_keys(source: str, name: str) -> set[str]:
     """Extrai as chaves de um ``const NOME: Record<string, number> = {...}``."""
     match = re.search(
-        rf"const {name}: Record<string, number> = \{{(.*?)\n\}};",
+        rf"(?:export )?const {name}: Record<string, number> = \{{(.*?)\n\}};",
         source,
         re.DOTALL,
     )
@@ -53,7 +56,8 @@ def _record_keys(source: str, name: str) -> set[str]:
 class TerminalStateContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.badge_source = STATUS_BADGE.read_text(encoding="utf-8")
-        self.process_source = PROCESS_PAGE.read_text(encoding="utf-8")
+        self.stages_source = JOB_STAGES.read_text(encoding="utf-8")
+        self.options_source = RUN_OPTIONS.read_text(encoding="utf-8")
 
     def test_every_terminal_failure_is_coloured_as_a_failure(self) -> None:
         # `startsWith("FALHA")` cobre metade do vocabulário. A outra metade —
@@ -71,7 +75,7 @@ class TerminalStateContractTests(unittest.TestCase):
         self.assertEqual(set(), uncovered)
 
     def test_every_terminal_failure_points_at_the_stage_that_failed(self) -> None:
-        mapped = _record_keys(self.process_source, "STEP_BY_STATUS")
+        mapped = _record_keys(self.stages_source, "STEP_BY_STATUS")
         uncovered = {
             state
             for state in TERMINAL_STATES
@@ -89,7 +93,7 @@ class TerminalStateContractTests(unittest.TestCase):
             REPO_ROOT / "engines" / "primary" / "pipeline.py"
         ).read_text(encoding="utf-8")
         announced = set(re.findall(r'status\.update\(\s*"([A-Z_]+)"', pipeline))
-        mapped = _record_keys(self.process_source, "STEP_BY_STATUS")
+        mapped = _record_keys(self.stages_source, "STEP_BY_STATUS")
         uncovered = {
             state
             for state in announced
@@ -118,11 +122,30 @@ class TerminalStateContractTests(unittest.TestCase):
             ).group(1).split("|")
         )
         block = re.search(
-            r"^const profiles: .*?^\];",
-            self.process_source,
+            r"^export const PROFILES: .*?^\];",
+            self.options_source,
             re.DOTALL | re.MULTILINE,
         )
-        self.assertIsNotNone(block, "Lista de perfis não encontrada na tela.")
+        self.assertIsNotNone(block, "Lista de perfis não encontrada na interface.")
+        offered = set(re.findall(r'value: "([A-Z_]+)"', block.group(0)))
+        self.assertEqual(accepted, offered)
+
+    def test_the_interface_offers_exactly_the_criteria_the_api_accepts(self) -> None:
+        # Mesma fronteira do teste acima, para o critério de elegibilidade.
+        # As duas telas de processamento leem esta lista, então uma divergência
+        # aqui atingiria a rodada única e o lote de uma vez.
+        api = (REPO_ROOT / "backend" / "app" / "main.py").read_text(encoding="utf-8")
+        accepted = set(
+            re.search(
+                r'Form\(pattern="\^\((PERFIL_EXATO[^)]*)\)\$"\)', api
+            ).group(1).split("|")
+        )
+        block = re.search(
+            r"^export const CRITERIA: .*?^\];",
+            self.options_source,
+            re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(block, "Lista de critérios não encontrada na interface.")
         offered = set(re.findall(r'value: "([A-Z_]+)"', block.group(0)))
         self.assertEqual(accepted, offered)
 

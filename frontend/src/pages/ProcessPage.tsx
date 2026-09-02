@@ -8,9 +8,14 @@ import {
   listJobs,
   validateUpload,
 } from "../api";
+import BatchPanel from "../components/BatchPanel";
+import RunOptions from "../components/RunOptions";
 import ResetPrimaryRounds from "../components/ResetPrimaryRounds";
 import StatusBadge, { humanizeStatus } from "../components/StatusBadge";
-import { formatAnalysisJobLabel, formatJobDate } from "../jobPresentation";
+import RoundPicker from "../components/RoundPicker";
+import { formatJobDate } from "../jobPresentation";
+import { STEP_BY_STATUS, jobFailed as isJobFailed, stepIndex, steps } from "../jobStages";
+import { count, megabytes, percent, seconds } from "../numberFormat";
 import type {
   AllocationPage,
   EligibilityCriterion,
@@ -20,93 +25,9 @@ import type {
   UploadResult,
 } from "../types";
 
-const steps = ["Preparando", "Validando", "Otimizando", "Auditando", "Publicando"];
-
-const profiles: {
-  value: ExecutionProfile;
-  label: string;
-  tag?: string;
-  official?: boolean;
-  hint: string;
-}[] = [
-  {
-    value: "PROVA_COMPLETA",
-    label: "Prova completa",
-    tag: "padrão",
-    official: true,
-    hint: "Prova que nenhuma alocação melhor existe sob as regras atuais. É a única que pode virar o resultado oficial do módulo.",
-  },
-  {
-    value: "COBERTURA_PROVADA",
-    label: "Cobertura provada",
-    hint: "Prova que ninguém cobre mais disciplinas que isto, mas não prova a escolha entre soluções de mesma cobertura. Não pode ser homologada.",
-  },
-  {
-    value: "MARGEM_ACEITA",
-    label: "Margem aceita",
-    hint: "Aceita ficar até N disciplinas abaixo do melhor possível, com essa diferença provada. Útil quando o tempo importa mais que o último ponto de cobertura. Não pode ser homologada.",
-  },
-  {
-    value: "EXPLORACAO_RAPIDA",
-    label: "Exploração rápida",
-    hint: "Entrega uma alocação utilizável, sem provar que é a melhor. Serve para testar uma base nova ou uma premissa. Não pode ser homologada.",
-  },
-];
-
-const criteria: {
-  value: EligibilityCriterion;
-  label: string;
-  tag?: string;
-  hint: string;
-}[] = [
-  {
-    value: "PERFIL_EXATO",
-    label: "Perfil da disciplina",
-    tag: "padrão",
-    hint: "Só entra na disputa quem tem o perfil exato da disciplina. Máxima aderência pedagógica, e a menor cobertura das três.",
-  },
-  {
-    value: "CLUSTER_PREFERENCIAL",
-    label: "Cluster com perfil preferencial",
-    hint: "Aceita qualquer perfil do cluster da disciplina, mas escolhe o perfil exato sempre que houver empate. Cobre mais sem abrir mão da aderência onde ela é possível.",
-  },
-  {
-    value: "CLUSTER_PURO",
-    label: "Cluster puro",
-    hint: "Aceita qualquer perfil do cluster, sem preferir o perfil exato. Cobre exatamente o mesmo que a opção acima; muda apenas quais docentes ficam com quais disciplinas.",
-  },
-];
-
-// Etapa em que cada estado do motor se encontra. Os estados terminais de falha
-// precisam apontar a etapa que realmente falhou: sem eles, uma auditoria
-// reprovada era desenhada como falha em "Preparando", mandando o operador
-// conferir o arquivo de entrada em vez do relatorio de auditoria.
-const STEP_BY_STATUS: Record<string, number> = {
-  SELECIONANDO_ENTRADA: 0,
-  COPIANDO_ENTRADA: 0,
-  FALHA_ENTRADA_CONFIG: 0,
-  VALIDANDO: 1,
-  FALHA_VALIDACAO: 1,
-  VALIDACAO_REPROVADA: 1,
-  SNAPSHOT_ALTERADO: 1,
-  RESOLVENDO: 2,
-  FALHA_SOLVER: 2,
-  AUDITANDO: 3,
-  FALHA_AUDITORIA: 3,
-  AUDITORIA_REPROVADA: 3,
-  OTIMO_NAO_COMPROVADO: 3,
-  GRAVANDO_ALOCACAO: 4,
-};
-
-function stepIndex(status: string): number {
-  if (status === "CONCLUIDA") return steps.length;
-  const mapped = STEP_BY_STATUS[status];
-  if (mapped !== undefined) return mapped;
-  if (status.startsWith("FALHA")) return 0;
-  return 0;
-}
-
 export default function ProcessPage() {
+  // Rodada avulsa continua sendo o padrao; o lote e uma escolha explicita.
+  const [mode, setMode] = useState<"single" | "batch">("single");
   const [file, setFile] = useState<File | null>(null);
   const [module, setModule] = useState<number | "">("");
   const [criterion, setCriterion] = useState<EligibilityCriterion>("PERFIL_EXATO");
@@ -170,7 +91,7 @@ export default function ProcessPage() {
     (validation?.status !== "APROVADO_COM_RESSALVAS" || confirmWarnings);
 
   const currentStep = useMemo(() => stepIndex(job?.status ?? "QUEUED"), [job?.status]);
-  const jobFailed = Boolean(job?.terminal && job.status !== "CONCLUIDA");
+  const jobFailed = isJobFailed(job?.status ?? "", Boolean(job?.terminal));
 
   const chooseFile = (selected: File | null) => {
     setFile(selected);
@@ -248,28 +169,57 @@ export default function ProcessPage() {
     <div className="page-container">
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Execução auditável</p>
           <h1>Processar uma nova alocação</h1>
-          <p>Valide a base, acompanhe cada etapa e consulte o resultado sem perder o histórico.</p>
+          <p>
+            {mode === "single"
+              ? "Valide a base, acompanhe cada etapa e consulte o resultado sem perder o histórico."
+              : "Valide vários módulos de uma vez, acompanhe a fila e consulte o resultado de cada um."}
+          </p>
         </div>
         <div className="page-heading-actions">
-          {jobs.length > 0 && (
-            <label className="compact-field">
-              <span>Execuções recentes</span>
-              <select value={job?.id ?? ""} onChange={(event) => void openExistingJob(event.target.value)}>
-                <option value="">Selecionar execução</option>
-                {jobs.map((item) => (
-                  <option value={item.id} key={item.id}>
-                    {formatAnalysisJobLabel(item)} · {humanizeStatus(item.status)}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {mode === "single" && jobs.length > 0 && (
+            <RoundPicker
+              label="Execuções recentes"
+              jobs={jobs}
+              value={job?.id ?? ""}
+              onChange={(id) => void openExistingJob(id)}
+              placeholder="Selecionar execução"
+              optionSuffix={(item) => humanizeStatus(item.status)}
+            />
           )}
           <ResetPrimaryRounds disabled={!jobs.length || jobs.some((item) => !item.terminal)} />
         </div>
       </div>
 
+      <div className="process-mode-switch" role="tablist" aria-label="Tipo de execução">
+        <button
+          type="button"
+          role="tab"
+          className={mode === "single" ? "active" : ""}
+          aria-selected={mode === "single"}
+          onClick={() => setMode("single")}
+        >
+          Rodada única
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={mode === "batch" ? "active" : ""}
+          aria-selected={mode === "batch"}
+          onClick={() => setMode("batch")}
+        >
+          Lote de módulos
+        </button>
+        <p className="process-mode-hint">
+          {mode === "single"
+            ? "Uma planilha, um módulo, uma rodada."
+            : "Uma planilha por módulo ou uma planilha anual: uma rodada por módulo, em fila."}
+        </p>
+      </div>
+
+      {mode === "batch" && <BatchPanel />}
+
+      {mode === "single" && <>
       {error && <div className="alert error" role="alert">{error}</div>}
 
       <section className="panel upload-panel">
@@ -286,7 +236,7 @@ export default function ProcessPage() {
             <input type="file" accept=".xlsx" onChange={onFileChange} />
             <span className="upload-icon" aria-hidden="true">↑</span>
             <strong>{file ? file.name : "Arraste a planilha ou clique para selecionar"}</strong>
-            <span>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB` : "A fonte será copiada e preservada na rodada"}</span>
+            <span>{file ? megabytes(file.size) : "A fonte será copiada e preservada na rodada"}</span>
           </label>
           <div className="upload-actions">
             <label className="field">
@@ -296,73 +246,15 @@ export default function ProcessPage() {
                 {[51, 52, 53, 54].map((value) => <option value={value} key={value}>Módulo {value}</option>)}
               </select>
             </label>
-            <fieldset className="option-group">
-              <legend>Quem pode assumir cada disciplina?</legend>
-              {criteria.map((item) => (
-                <label className="option" key={item.value}>
-                  <input
-                    type="radio"
-                    name="criterio-elegibilidade"
-                    value={item.value}
-                    checked={criterion === item.value}
-                    onChange={() => {
-                      setCriterion(item.value);
-                      setUpload(null);
-                      setConfirmWarnings(false);
-                    }}
-                  />
-                  <span className="option-text">
-                    <span className="option-title">
-                      {item.label}
-                      {item.tag && <small className="is-default">{item.tag}</small>}
-                    </span>
-                    <p>{item.hint}</p>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-
-            <fieldset className="option-group">
-              <legend>Quanta prova a rodada precisa entregar?</legend>
-              {profiles.map((item) => (
-                <label className="option" key={item.value}>
-                  <input
-                    type="radio"
-                    name="perfil-execucao"
-                    value={item.value}
-                    checked={profile === item.value}
-                    onChange={() => {
-                      setProfile(item.value);
-                      setUpload(null);
-                      setConfirmWarnings(false);
-                    }}
-                  />
-                  <span className="option-text">
-                    <span className="option-title">
-                      {item.label}
-                      {item.tag && <small className="is-default">{item.tag}</small>}
-                      {item.official && <small className="is-official">homologável</small>}
-                    </span>
-                    <p>{item.hint}</p>
-                  </span>
-                </label>
-              ))}
-            </fieldset>
-            {profile === "MARGEM_ACEITA" && (
-              <label className="field">
-                <span>Margem aceita, em ofertas</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={marginOffers}
-                  onChange={(event) => {
-                    setMarginOffers(Math.max(1, Number(event.target.value) || 1));
-                    setUpload(null);
-                  }}
-                />
-              </label>
-            )}
+            <RunOptions
+              scope="unica"
+              criterion={criterion}
+              profile={profile}
+              marginOffers={marginOffers}
+              onCriterion={(value) => { setCriterion(value); setUpload(null); setConfirmWarnings(false); }}
+              onProfile={(value) => { setProfile(value); setUpload(null); setConfirmWarnings(false); }}
+              onMarginOffers={(value) => { setMarginOffers(value); setUpload(null); }}
+            />
             <button className="button primary" disabled={!file || module === "" || busy} onClick={() => void handleValidate()}>
               {busy && !upload ? "Validando…" : "Validar arquivo"}
             </button>
@@ -452,14 +344,14 @@ export default function ProcessPage() {
       {summary && job && (
         <section className="panel result-section">
           <div className="section-title">
-            <div><span className="step-kicker">RESULTADO</span><h2>Rodada concluída e auditada</h2></div>
+            <div><h2>Rodada concluída e auditada</h2></div>
             <StatusBadge value={summary.solver_status} label={`CP-SAT ${humanizeStatus(summary.solver_status)}`} />
           </div>
           <div className="kpi-grid">
-            <article className="kpi-card featured"><span>Cobertura</span><strong>{coverage.toFixed(2)}%</strong><small>{summary.allocated} de {summary.transmissions} ofertas</small></article>
-            <article className="kpi-card"><span>Não alocadas</span><strong>{summary.unassigned}</strong><small>Exigem análise dos motivos</small></article>
-            <article className="kpi-card"><span>Docentes utilizados</span><strong>{summary.used_teachers}</strong><small>de {summary.active_teachers} ativos</small></article>
-            <article className="kpi-card"><span>Tempo do motor</span><strong>{summary.wall_time_seconds.toFixed(1)}s</strong><small>Solução {summary.solver_status.toLowerCase()}</small></article>
+            <article className="kpi-card featured"><span>Cobertura</span><strong>{percent(coverage)}</strong><small>{count(summary.allocated)} de {count(summary.transmissions)} ofertas</small></article>
+            <article className="kpi-card"><span>Não alocadas</span><strong>{count(summary.unassigned)}</strong><small>Exigem análise dos motivos</small></article>
+            <article className="kpi-card"><span>Docentes utilizados</span><strong>{count(summary.used_teachers)}</strong><small>de {count(summary.active_teachers)} ativos</small></article>
+            <article className="kpi-card"><span>Tempo do motor</span><strong>{seconds(summary.wall_time_seconds)}</strong><small>Solução {summary.solver_status.toLowerCase()}</small></article>
           </div>
 
           <div className="downloads">
@@ -517,6 +409,7 @@ export default function ProcessPage() {
           )}
         </section>
       )}
+      </>}
     </div>
   );
 }

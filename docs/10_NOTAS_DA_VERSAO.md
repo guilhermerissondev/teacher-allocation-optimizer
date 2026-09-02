@@ -7,6 +7,105 @@ Status: release técnica para produção local mono-usuário em Windows.
 Esta versão transforma o critério de elegibilidade, antes fixo em perfil exato,
 em uma escolha explícita do usuário na tela de importação.
 
+### CH letiva alocável como denominador da utilização
+
+A aba DOCENTES ganhou a coluna **CH_LETIVA_ALOCÁVEL**, e folgas e percentuais
+passaram a usá-la no lugar da `CH_LETIVA` cheia.
+
+O motivo é de modelagem. Cada transmissão consome um bloco fixo de horas
+semanais, então a fração que não fecha um bloco nunca esteve disponível: um
+regente de 12h contratadas com 9h letivas recebe no máximo quatro disciplinas de
+2h. As 8h são o teto real, e dividir a carga pelas 9h fazia o corpo docente
+inteiro parecer menos ocupado do que o modelo permite. Na base de demonstração,
+o regime T12 do Professor Regente cai de 774h para 688h de capacidade e a
+utilização de pico sobe de 40,83% para 45,93%.
+
+O arredondamento já existia no Dashboard desde a vBeta 1.0, mas só lá: a
+planilha e a tela reportavam capacidades diferentes para o mesmo corpo docente
+— 1.294h contra 1.208h na base de demonstração. Agora coincidem.
+
+**O resultado da alocação não muda.** A restrição de inteiros do solver já
+produzia o mesmo piso, então o conjunto de soluções viáveis é idêntico; o que
+muda é o denominador dos relatórios. `EXCEDE_CH_LETIVA` também mantém o valor,
+porque uma carga só ultrapassa a alocável quando já ultrapassava a contratada.
+Índices que leem a utilização da aba DOCENTES — o score de risco e a mediana de
+pico em Insights — sobem junto, e alguns docentes podem mudar de faixa de risco.
+
+### Abertura por cargo na planilha de saída
+
+A planilha final ganhou a aba **DOCENTES POR CARGO**, derivada da aba DOCENTES.
+Ela reproduz a abertura de utilização docente do relatório semanal: cada cargo
+abre nos regimes de contratação (T40, T20, T12..., com sufixo Mensalista no
+contrato Stricto) e a tabela fecha em Total Geral, com headcount, CH contratada,
+CH letiva alocável, CH alocada e utilização.
+
+Como o motor apura o módulo inteiro e não um período isolado, a aba traz as
+métricas das duas etapas e do pico, em vez de escolher uma delas. Cargos sem CH
+letiva alocável — o contrato Stricto — registram NSA no lugar do percentual, e
+não um denominador zerado.
+
+### Cluster declarado no docente (contrato 2.4)
+
+A aba DOCENTES passou a aceitar a coluna **CLUSTER**. Quando a base a informa,
+ela vira a referência dos métodos por cluster, no lugar da união dos perfis das
+ofertas do cluster.
+
+O motivo é de fidelidade: a regra anterior fazia a candidatura por cluster
+depender da qualidade da taxonomia de perfil. Um perfil presente em dois
+clusters unia os dois num grupo só, e o docente virava candidato a ofertas de
+uma área que a coordenação não reconhece como sua.
+
+A coluna é opcional e a mudança é compatível: base sem ela produz exatamente o
+mesmo resultado de antes. `PERFIL_EXATO` não foi afetado, e a distinção entre
+`CLUSTER_PURO` e `CLUSTER_PREFERENCIAL` continua sendo só de desempate.
+`BASE_ELEGIBILIDADE` ganhou o valor `CLUSTER_DECLARADO` para separar os dois
+caminhos na auditoria.
+
+### Revisão de apresentação e saída (agosto/2026)
+
+Rodada de correções concentrada na camada de apresentação. O motor de
+otimização — solver, auditoria e critérios de elegibilidade — não foi alterado.
+
+**Carga docente por etapa.** A aba DOCENTES colapsava as duas metades do módulo
+numa média, o que gravava 1 h para uma disciplina de 2 h sempre que ela ocupava
+uma etapa só. As colunas passaram a declarar cada etapa separadamente, com
+`CH_ALOCADA_PICO` para a comparação com a `CH_LETIVA` e `EXCEDE_CH_LETIVA` como
+sinal de governança. O solver já impunha o teto por etapa; o defeito era só do
+relatório. O indicador "Horas semanais médias no módulo" saiu da aba RESUMO,
+substituído por "Docentes acima da CH_LETIVA em alguma etapa".
+
+**Seleção de rodada.** O rótulo das opções concatenava contexto, módulo,
+critério, perfil, rodada, data e arquivo, passava de 140 caracteres e era
+cortado em todas as abas — problema que o processamento em lote agravou, por
+gerar rodadas que só se distinguem pelo módulo. Um componente único passou a
+mostrar apenas o que distingue as rodadas, agrupadas pelo lote de origem, com o
+contexto completo numa legenda abaixo do campo.
+
+**Cenários.** A divisão entre aplicar a uma entidade e aplicar em lote deixou de
+existir: um só formulário atende os dois casos. Todos os alvos e filtros viraram
+listas suspensas com busca e seleção múltipla, e os filtros passaram a se
+restringir mutuamente, oferecendo apenas os valores ainda disponíveis. Campos que
+eram de texto livre — perfil da disciplina — e de digitação numérica — CH letiva
+— passaram a listar os valores praticados na base, com contagem.
+
+**Insights.** A severidade e o texto dos cartões passaram a sair dos números da
+rodada. Antes a cor vinha do assunto do cartão e a orientação era fixa, de modo
+que uma rodada com cobertura completa ainda mandava atacar lacunas inexistentes.
+
+**Exclusão de lote.** `DELETE /api/batches/{id}` remove um lote do histórico com
+a mesma cascata e as mesmas proteções do reset de rodadas-base.
+
+**Rota removida.** `POST /api/scenarios/{id}/changes` saiu: a rota em lote aceita
+uma linha, aplica a mesma validação e devolve os mesmos registros.
+
+**Suíte da interface.** O frontend passou a ter testes automatizados (Vitest e
+Testing Library), integrados ao `scripts/testar.ps1`. A lógica de filtros
+cruzados, seleção múltipla e rótulos de rodada deixou de depender apenas de
+conferência visual.
+
+**Diagnóstico de versão.** A barra lateral exibe o carimbo do build, para
+distinguir numa olhada uma página servida do cache de uma recém-publicada.
+
 ### Critério de elegibilidade selecionável
 
 - três métodos: PERFIL_EXATO, CLUSTER_PREFERENCIAL e CLUSTER_PURO;

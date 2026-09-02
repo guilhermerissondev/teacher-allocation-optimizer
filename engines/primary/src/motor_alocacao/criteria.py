@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Iterable
 
+from .normalization import normalize
+
 if TYPE_CHECKING:  # pragma: no cover - apenas para tipagem estática
     from .domain import Teacher, Transmission
 
@@ -78,6 +80,55 @@ def eligible_profiles_for(
 def has_exact_profile(transmission: "Transmission", teacher: "Teacher") -> bool:
     """Aderência exata de perfil, independente do critério vigente."""
     return bool(transmission.profiles.intersection(teacher.profiles))
+
+
+def declares_teacher_clusters(teachers: Iterable["Teacher"]) -> bool:
+    """A base informa o cluster do docente?
+
+    Quando informa, o cluster passa a ser a referencia dos metodos por cluster.
+    Bases anteriores a esse contrato nao trazem a coluna e seguem pela uniao de
+    perfis das ofertas, preservando o resultado que ja produziam.
+    """
+    return any(teacher.clusters for teacher in teachers)
+
+
+def teacher_meets_offer(
+    transmission: "Transmission",
+    teacher: "Teacher",
+    criterion: Any,
+    cluster_profiles: dict[str, frozenset[str]],
+    cluster_reference: bool = False,
+) -> bool:
+    """Aderencia do docente a oferta sob o criterio vigente.
+
+    Nos metodos por cluster com o cluster declarado nos dois lados, a
+    comparacao e direta entre clusters: o perfil deixa de mediar a candidatura,
+    que era o ponto fragil quando a taxonomia de perfil estava incompleta.
+    """
+    if cluster_reference and uses_cluster(criterion):
+        cluster = normalize(transmission.cluster)
+        if cluster:
+            return cluster in teacher.clusters
+        # Oferta sem cluster nao forma grupo e segue restrita ao proprio perfil.
+        return has_exact_profile(transmission, teacher)
+    accepted = eligible_profiles_for(transmission, criterion, cluster_profiles)
+    return bool(accepted.intersection(teacher.profiles))
+
+
+def eligibility_basis(
+    transmission: "Transmission",
+    teacher: "Teacher",
+    criterion: Any,
+    cluster_reference: bool = False,
+) -> str:
+    """Como a candidatura foi aceita, para o relatorio explicar a decisao."""
+    if has_exact_profile(transmission, teacher):
+        return "PERFIL_EXATO"
+    if not uses_cluster(criterion):
+        return "INDEFINIDA"
+    if cluster_reference and normalize(transmission.cluster):
+        return "CLUSTER_DECLARADO"
+    return "CLUSTER"
 
 
 def falls_back_to_profile(transmission: "Transmission", criterion: Any) -> bool:

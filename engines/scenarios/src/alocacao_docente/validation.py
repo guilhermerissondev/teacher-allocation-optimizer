@@ -23,7 +23,7 @@ from motor_alocacao.criteria import (
 
 MAPA_SHEET = "MAPA PEDAGÓGICO"
 DOCENTES_SHEET = "DOCENTES"
-VALIDATION_CONTRACT_VERSION = "2.3"
+VALIDATION_CONTRACT_VERSION = "2.4"
 
 CRITERION_ASSUMPTIONS = {
     CRITERION_PROFILE: (
@@ -52,6 +52,10 @@ DOCENTES_HEADERS = (
     "NOME", "CHAPA", "NM_FUNCAO", "CH_CONTRATADA", "CH_LETIVA", "GESTOR",
     "STATUS", "PERFIL_DISCIPLINA",
 )
+# CLUSTER do docente e reconhecido, mas nao exigido: quando a base o traz, ele
+# passa a ser a referencia dos metodos por cluster; quando nao traz, a base
+# continua valendo com a regra anterior, pela uniao de perfis das ofertas.
+DOCENTES_OPCIONAIS = ("CLUSTER",)
 
 MAPA_ENUMS = {
     "ANO": {"1º", "2º", "3º", "4º", "5º"},
@@ -269,8 +273,10 @@ def _records(worksheet: Any, headers: tuple[str, ...]) -> list[tuple[int, dict[s
             (
                 excel_row,
                 {
+                    # Coluna opcional ausente entra como vazia, para o registro
+                    # ter sempre a mesma forma.
                     header: values[indexes[header]]
-                    if indexes[header] < len(values)
+                    if header in indexes and indexes[header] < len(values)
                     else None
                     for header in headers
                 },
@@ -279,10 +285,16 @@ def _records(worksheet: Any, headers: tuple[str, ...]) -> list[tuple[int, dict[s
     return records
 
 
-def _check_headers(report: ValidationReport, worksheet: Any, expected: tuple[str, ...]) -> bool:
+def _check_headers(
+    report: ValidationReport,
+    worksheet: Any,
+    expected: tuple[str, ...],
+    optional: tuple[str, ...] = (),
+) -> bool:
     actual = tuple(_text(cell.value) for cell in worksheet[1])
     missing = [header for header in expected if header not in actual]
-    extras = [header for header in actual if header and header not in expected]
+    conhecidos = set(expected) | set(optional)
+    extras = [header for header in actual if header and header not in conhecidos]
     duplicates = [header for header, count in Counter(actual).items() if header and count > 1]
     if missing:
         report.add("CRÍTICA", "COLUNAS_AUSENTES", worksheet.title, None,
@@ -790,9 +802,10 @@ def validate_workbook(
 
     mapa_ws, docentes_ws = workbook[MAPA_SHEET], workbook[DOCENTES_SHEET]
     mapa_ok = _check_headers(report, mapa_ws, MAPA_HEADERS)
-    docentes_ok = _check_headers(report, docentes_ws, DOCENTES_HEADERS)
+    docentes_ok = _check_headers(report, docentes_ws, DOCENTES_HEADERS, DOCENTES_OPCIONAIS)
     mapa = _records(mapa_ws, MAPA_HEADERS) if mapa_ok else []
-    docentes = _records(docentes_ws, DOCENTES_HEADERS) if docentes_ok else []
+    docentes = (_records(docentes_ws, DOCENTES_HEADERS + DOCENTES_OPCIONAIS)
+                if docentes_ok else [])
     report.sheets = {
         MAPA_SHEET: {"rows": len(mapa), "columns": len(MAPA_HEADERS)},
         DOCENTES_SHEET: {"rows": len(docentes), "columns": len(DOCENTES_HEADERS)},

@@ -96,9 +96,8 @@ if (-not (Test-Path -LiteralPath $Dist)) {
     throw "A compilação terminou sem gerar frontend\dist\index.html."
 }
 
-# O dist fica fora do manifesto, mas a regeração continua aqui porque o build
-# pode ter atualizado arquivos de origem rastreados; verificar em seguida
-# garante que a aplicação inicia logo após compilar.
+# O dist é distribuível e entra no manifesto: sem regerar, a verificação de
+# integridade acusa divergência e a aplicação recusa iniciar.
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 $Python = if (Test-Path -LiteralPath $VenvPython) { $VenvPython } else { (Get-Command python -ErrorAction Stop).Source }
 Invoke-Native $Python (Join-Path $Root "scripts\integridade_release.py") --gerar

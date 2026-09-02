@@ -11,6 +11,7 @@ import unicodedata
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, time as datetime_time
+from collections.abc import Iterable
 from pathlib import Path
 from threading import Event, Lock
 from typing import Any
@@ -36,6 +37,11 @@ SCENARIO_CHANGE_FIELDS: dict[str, dict[str, tuple[str, ...]]] = {
 
 ENTITY_SHEETS = {"teacher": "DOCENTES", "offer": "MAPA PEDAGÓGICO"}
 SCENARIO_POLICY_TYPES = {"ALOCAR_CLUSTER", "PRIORIDADE", "FIXAR"}
+
+# Teto da alteração em lote. Existe para que um filtro amplo demais não vire
+# uma transação enorme sem o operador perceber; a base de demonstração tem
+# pouco mais de duzentos docentes, então o limite não estorva o uso real.
+MAX_BATCH_CHANGE_ROWS = 500
 
 
 class ScenarioError(ValueError):
@@ -79,6 +85,24 @@ def _headers(worksheet: Any) -> dict[str, int]:
 def _normalize_key(value: Any) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     return " ".join(text.encode("ascii", "ignore").decode("ascii").lower().split())
+
+
+def _same_source_value(current: Any, candidate: Any) -> bool:
+    """A linha já está no valor pedido?
+
+    Compara números como números e texto sem caixa nem espaço repetido, do
+    mesmo jeito que a interface faz ao marcar uma alteração como inócua.
+    """
+    if current is None:
+        return False
+    if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+        try:
+            return float(current) == float(candidate)
+        except (TypeError, ValueError):
+            return False
+    left = " ".join(str(current).strip().upper().split())
+    right = " ".join(str(candidate).strip().upper().split())
+    return bool(left) and left == right
 
 
 def _normalize_change_value(field: str, value: Any) -> Any:
@@ -129,6 +153,52 @@ def _allowed_change(entity_type: str, change_type: str, field_name: str) -> bool
     return field_name in SCENARIO_CHANGE_FIELDS.get(entity_type, {}).get(change_type, ())
 
 
+def evaluate_change(
+    field_name: str,
+    old_value: Any,
+    *,
+    target: Any = None,
+    adjustment: int | None = None,
+    contracted_capacity: Any = None,
+) -> tuple[Any, str]:
+    """Decide o valor final de uma premissa sobre uma linha, ou por que ela cai.
+
+    Devolve `(valor, "")` quando a premissa entra e `(None, motivo)` quando ela
+    é recusada. Existe como função pura porque a mesma decisão é tomada em dois
+    lugares — a alteração em lote de um cenário e a projeção de um estudo sobre
+    os módulos do ano — e duas cópias divergiriam no primeiro ajuste de regra.
+    """
+    if adjustment is not None:
+        try:
+            base = int(old_value or 0)
+        except (TypeError, ValueError):
+            return None, "CH_LETIVA atual não é um número inteiro."
+        value: Any = base + int(adjustment)
+        if value < 0:
+            return None, f"O ajuste deixaria a CH_LETIVA negativa ({value}h)."
+    else:
+        value = target
+
+    if field_name == "CH_LETIVA":
+        try:
+            limit = (
+                int(contracted_capacity)
+                if contracted_capacity not in (None, "")
+                else None
+            )
+        except (TypeError, ValueError):
+            limit = None
+        if limit is not None and int(value) > limit:
+            return None, (
+                f"CH_LETIVA {value}h passaria da CH contratada ({limit}h) "
+                "e reprovaria a validação."
+            )
+
+    if _same_source_value(old_value, value):
+        return None, "A linha já está nesse valor."
+    return value, ""
+
+
 def _baseline_source(database: Database, scenario: dict[str, Any]) -> Path:
     baseline = database.get_job(scenario["baseline_job_id"])
     if not baseline:
@@ -174,44 +244,137 @@ def read_source_value(
         workbook.close()
 
 
-def add_scenario_change(
+def read_source_values(
+    source: Path,
+    entity_type: str,
+    row_numbers: Iterable[int],
+    field_name: str,
+) -> dict[int, Any]:
+    """Lê o mesmo campo de várias linhas abrindo a planilha uma única vez.
+
+    A leitura individual custa uma abertura de workbook por linha, o que
+    inviabiliza uma alteração em lote sobre centenas de docentes.
+    """
+    sheet_name = ENTITY_SHEETS.get(entity_type)
+    if not sheet_name:
+        raise ScenarioError("Tipo de entidade de cenário inválido.")
+    wanted = sorted(set(row_numbers))
+    workbook = load_workbook(source, read_only=True, data_only=True)
+    try:
+        if sheet_name not in workbook.sheetnames:
+            raise ScenarioError(f"A aba {sheet_name} não existe na rodada-base.")
+        worksheet = workbook[sheet_name]
+        headers = _headers(worksheet)
+        if field_name not in headers:
+            raise ScenarioError(f"A coluna {field_name} não existe em {sheet_name}.")
+        column = headers[field_name]
+        last_row = worksheet.max_row
+        values: dict[int, Any] = {}
+        for row_number in wanted:
+            if row_number < 2 or row_number > last_row:
+                raise ScenarioError(f"A linha {row_number} não existe em {sheet_name}.")
+            values[row_number] = worksheet.cell(row_number, column).value
+        return values
+    finally:
+        workbook.close()
+
+
+def add_scenario_changes_batch(
     database: Database,
     scenario_id: str,
     *,
     change_type: str,
     entity_type: str,
-    row_number: int,
     field_name: str,
-    new_value: Any,
+    row_numbers: list[int],
+    new_value: Any = None,
+    adjustment: int | None = None,
 ) -> dict[str, Any]:
+    """Aplica a mesma premissa a várias entidades de uma vez.
+
+    Dois modos: valor absoluto para todos, ou ajuste relativo em CH_LETIVA,
+    que preserva as diferenças de carga entre os docentes selecionados.
+
+    Linhas que não mudariam nada, ou que violariam a CH contratada, são
+    devolvidas como ignoradas com o motivo — nunca aplicadas em silêncio.
+    """
     scenario = _editable_scenario(database, scenario_id)
     change_type = change_type.strip().upper()
     entity_type = entity_type.strip().lower()
     field_name = field_name.strip().upper()
     if not _allowed_change(entity_type, change_type, field_name):
         raise ScenarioError("A alteração solicitada não pertence ao contrato de cenários.")
-    normalized = _normalize_change_value(field_name, new_value)
+    if not row_numbers:
+        raise ScenarioError("Selecione ao menos uma linha para a alteração em lote.")
+    if len(set(row_numbers)) > MAX_BATCH_CHANGE_ROWS:
+        raise ScenarioError(
+            f"A alteração em lote aceita no máximo {MAX_BATCH_CHANGE_ROWS} linhas por vez."
+        )
+    relative = adjustment is not None
+    if relative:
+        if field_name != "CH_LETIVA":
+            raise ScenarioError("O ajuste relativo só se aplica a CH_LETIVA.")
+        if isinstance(adjustment, bool) or not isinstance(adjustment, int):
+            raise ScenarioError("O ajuste de CH_LETIVA deve ser um número inteiro de horas.")
+        if adjustment == 0:
+            raise ScenarioError("O ajuste de CH_LETIVA precisa ser diferente de zero.")
+    else:
+        # Valida uma vez só: o valor absoluto é o mesmo para todas as linhas.
+        normalized_value = _normalize_change_value(field_name, new_value)
+
     source = _baseline_source(database, scenario)
+    catalog = source_catalog(database, scenario_id)
     if entity_type == "offer":
-        offered_rows = {
-            item["row_number"] for item in source_catalog(database, scenario_id)["offers"]
-        }
-        if row_number not in offered_rows:
-            raise ScenarioError("A linha selecionada não pertence às ofertas tratadas pelo solver.")
-    old_value = read_source_value(source, entity_type, row_number, field_name)
-    payload = {
-        "id": uuid.uuid4().hex,
-        "scenario_id": scenario_id,
-        "change_type": change_type,
-        "entity_type": entity_type,
-        "row_number": row_number,
-        "field_name": field_name,
-        "old_value_json": _dump_value(old_value),
-        "new_value_json": _dump_value(normalized),
-        "created_at": utc_now(),
+        allowed_rows = {item["row_number"] for item in catalog["offers"]}
+    else:
+        allowed_rows = {item["row_number"] for item in catalog["teachers"]}
+    unknown = sorted(set(row_numbers) - allowed_rows)
+    if unknown:
+        raise ScenarioError(
+            "Linhas fora do conjunto tratado pelo solver: "
+            + ", ".join(str(item) for item in unknown[:10])
+        )
+
+    contracted = {
+        item["row_number"]: item.get("contracted_capacity")
+        for item in catalog["teachers"]
     }
-    persisted = database.upsert_scenario_change(payload)
-    return public_change(persisted)
+    current = read_source_values(source, entity_type, row_numbers, field_name)
+
+    applied: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for row_number in sorted(set(row_numbers)):
+        old_value = current[row_number]
+        target, refusal = evaluate_change(
+            field_name,
+            old_value,
+            target=None if relative else normalized_value,
+            adjustment=adjustment if relative else None,
+            contracted_capacity=contracted.get(row_number),
+        )
+        if refusal:
+            skipped.append({"row_number": row_number, "reason": refusal})
+            continue
+
+        persisted = database.upsert_scenario_change({
+            "id": uuid.uuid4().hex,
+            "scenario_id": scenario_id,
+            "change_type": change_type,
+            "entity_type": entity_type,
+            "row_number": row_number,
+            "field_name": field_name,
+            "old_value_json": _dump_value(old_value),
+            "new_value_json": _dump_value(target),
+            "created_at": utc_now(),
+        })
+        applied.append(public_change(persisted))
+
+    return {
+        "applied": applied,
+        "skipped": skipped,
+        "applied_count": len(applied),
+        "skipped_count": len(skipped),
+    }
 
 
 def public_change(change: dict[str, Any]) -> dict[str, Any]:
@@ -363,6 +526,12 @@ def source_catalog(database: Database, scenario_id: str) -> dict[str, Any]:
                 "status": str(teacher_value("STATUS") or ""),
                 "job_function": str(teacher_value("NM_FUNCAO") or ""),
                 "teaching_capacity": teacher_value("CH_LETIVA") or 0,
+                # A CH contratada é o teto que a validação cobra: sem ela a
+                # seleção em lote não teria como avisar que um aumento de
+                # carga reprovaria a rodada. Fica nulo quando a coluna não
+                # existe, para não confundir "sem teto conhecido" com "teto 0".
+                "contracted_capacity": teacher_value("CH_CONTRATADA"),
+                "manager": str(teacher_value("GESTOR") or ""),
                 "profile": str(teacher_value("PERFIL_DISCIPLINA") or ""),
             })
 
@@ -517,6 +686,7 @@ def public_scenario(database: Database, scenario: dict[str, Any]) -> dict[str, A
     ]
     return {
         "id": scenario["id"],
+        "study_id": scenario.get("study_id"),
         "baseline_job_id": scenario["baseline_job_id"],
         "baseline_round": scenario.get("baseline_round"),
         "baseline_filename": scenario.get("baseline_filename"),
@@ -721,6 +891,7 @@ class ScenarioManager:
                         message="Simulação cancelada durante o encerramento seguro.",
                     )
                     self.database.update_scenario(scenario_id, status="FALHA")
+                    self._settle_study(scenario_id)
         for process in processes:
             self._terminate_process(process)
         self.executor.shutdown(wait=True, cancel_futures=True)
@@ -741,13 +912,73 @@ class ScenarioManager:
         with self._state_lock:
             self._futures.pop(future, None)
 
+    def _settle_study(self, scenario_id: str) -> None:
+        """Fecha o estudo quando o último módulo dele para de rodar.
+
+        Só o estudo inteiro tem um desfecho: enquanto houver módulo na fila, o
+        estudo continua EXECUTANDO, ainda que este módulo já tenha terminado.
+        """
+        scenario = self.database.get_scenario(scenario_id)
+        study_id = (scenario or {}).get("study_id")
+        if not study_id:
+            return
+        jobs = [
+            job
+            for entry in self.database.study_modules(study_id)
+            if entry["scenario_id"]
+            for job in [self.database.latest_scenario_job(entry["scenario_id"])]
+            if job
+        ]
+        if any(job["status"] in {"QUEUED", "RUNNING"} for job in jobs):
+            return
+        concluded = [job for job in jobs if job["status"] == "CONCLUIDA"]
+        if not jobs:
+            status = "RASCUNHO"
+        elif len(concluded) == len(jobs):
+            status = "CONCLUIDO"
+        elif concluded:
+            status = "PARCIAL"
+        else:
+            status = "FALHA"
+        self.database.update_study(study_id, status=status)
+
     def create_run(self, scenario_id: str) -> dict[str, Any]:
         # The web package intentionally runs as a single process. This lock
         # makes the check-and-reserve sequence atomic within that contract.
         with self.coordinator.exclusive():
             return self._reserve_run(scenario_id)
 
-    def _reserve_run(self, scenario_id: str) -> dict[str, Any]:
+    def create_study_run(self, scenario_ids: list[str]) -> list[dict[str, Any]]:
+        """Enfileira todos os módulos de um estudo de uma vez.
+
+        O teto normal da fila existe para conter reenvios acidentais da tela.
+        Um estudo é uma decisão deliberada e conhece o próprio tamanho, então
+        ele exige a fila vazia e enfileira os módulos juntos — o executor segue
+        com um único worker, de modo que as simulações rodam em série.
+        """
+        with self.coordinator.exclusive():
+            if self._stopping.is_set():
+                raise ScenarioError("O servidor está sendo encerrado.")
+            if not scenario_ids:
+                raise ScenarioError(
+                    "Nenhum módulo do estudo está liberado para simulação."
+                )
+            if self.database.count_inflight_jobs("SCENARIO"):
+                raise ScenarioQueueFull(
+                    "Há simulação de cenário em andamento. "
+                    "Aguarde a fila esvaziar antes de iniciar um estudo."
+                )
+            return [
+                self._reserve_run(scenario_id, enforce_queue_limit=False)
+                for scenario_id in scenario_ids
+            ]
+
+    def _reserve_run(
+        self,
+        scenario_id: str,
+        *,
+        enforce_queue_limit: bool = True,
+    ) -> dict[str, Any]:
         if self._stopping.is_set():
             raise ScenarioError("O servidor está sendo encerrado.")
         scenario = self.database.get_scenario(scenario_id)
@@ -760,7 +991,7 @@ class ScenarioManager:
         latest = self.database.latest_scenario_job(scenario_id)
         if latest and latest["status"] in {"QUEUED", "RUNNING"}:
             raise ScenarioError("Este cenário já está em execução.")
-        if (
+        if enforce_queue_limit and (
             self.database.count_inflight_jobs("SCENARIO")
             >= self.settings.max_scenario_inflight_jobs
         ):
@@ -824,6 +1055,7 @@ class ScenarioManager:
                     message="Simulação cancelada durante o encerramento seguro.",
                 )
                 self.database.update_scenario(scenario_id, status="FALHA")
+                self._settle_study(scenario_id)
             return
         process: subprocess.Popen[str] | None = None
         try:
@@ -901,6 +1133,7 @@ class ScenarioManager:
                     scenario_id,
                     status="CONCLUIDO" if state == "CONCLUIDA" else "FALHA",
                 )
+                self._settle_study(scenario_id)
         except Exception as exc:
             stopping = self._stopping.is_set()
             with self.coordinator.exclusive():
@@ -915,6 +1148,7 @@ class ScenarioManager:
                     exit_code=50,
                 )
                 self.database.update_scenario(scenario_id, status="FALHA")
+                self._settle_study(scenario_id)
         finally:
             if process is not None:
                 with self._state_lock:

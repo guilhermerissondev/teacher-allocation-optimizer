@@ -50,3 +50,16 @@ auditoria/
 Thumbs.db
 .idea/
 .vscode/
+
+# Artefatos de teste e de rodada (projeto 2.0)
+*.tsbuildinfo
+frontend/node_modules/
+scripts/tests/.release-scripts-*/
+backend/tests/tmp*/
+engines/primary/entrada/*.xlsx
+engines/primary/resultados/rodada_*/
+engines/scenarios/resultados/rodada_*/
+*.sqlite3-shm
+*.sqlite3-wal
+logs/
+release/

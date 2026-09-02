@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -19,7 +20,12 @@ APP_ROOT = Path(__file__).resolve().parents[2]
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
-from scripts import backup_restore, empacotar_release, integridade_release  # noqa: E402
+from scripts import (  # noqa: E402
+    backup_restore,
+    bloqueio_dados,
+    empacotar_release,
+    integridade_release,
+)
 import executar  # noqa: E402
 from executar import DataDirectoryLock  # noqa: E402
 
@@ -585,6 +591,137 @@ class DiretorioOperacionalPadraoTests(WorkspaceTestCase):
         with patch.dict(os.environ, {"LOCALAPPDATA": str(perfil)}):
             self.assertIsNone(executar.aviso_dados_anteriores(self.workspace / "data"))
 
+
+class BloqueioDoDiretorioDeDadosTests(WorkspaceTestCase):
+    """Regressão: o bloqueio precisa vir do sistema, não de um PID em arquivo.
+
+    Um encerramento abrupto deixa o arquivo para trás. Quando o sistema
+    reciclava aquele PID, a checagem antiga concluía que havia instância viva e
+    a aplicação recusava abrir com código 1.
+    """
+
+    def make_data_dir(self) -> Path:
+        data_dir = self.workspace / "dados"
+        data_dir.mkdir()
+        return data_dir
+
+    def start_holder(self, data_dir: Path) -> tuple[subprocess.Popen, int]:
+        """Sobe um processo que segura o bloqueio até ser morto.
+
+        Devolve também o PID que o interpretador anunciou: em ambientes cujo
+        ``python.exe`` do .venv é apenas um lançador, ele não coincide com o
+        PID devolvido por ``Popen``, e é o anunciado que grava o bloqueio.
+        """
+        program = self.workspace / f"segurar-{uuid.uuid4().hex}.py"
+        program.write_text(
+            "\n".join(
+                (
+                    "import os, sys, time",
+                    f"sys.path.insert(0, {str(APP_ROOT)!r})",
+                    "from pathlib import Path",
+                    "from executar import DataDirectoryLock",
+                    f"with DataDirectoryLock(Path({str(data_dir)!r})):",
+                    "    print(os.getpid(), flush=True)",
+                    "    time.sleep(120)",
+                )
+            ),
+            encoding="utf-8",
+        )
+        holder = subprocess.Popen(
+            [sys.executable, str(program)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        pid: int | None = None
+        # A limpeza fecha sobre pid para alcançar o interpretador anunciado
+        # assim que ele for conhecido; matar só o lançador deixaria o dono do
+        # bloqueio vivo e o diretório de trabalho preso.
+        self.addCleanup(lambda: self.kill_holder(holder, pid))
+        announced = holder.stdout.readline().strip()
+        self.assertRegex(announced, r"^\d+$", "O processo não chegou a reservar o bloqueio.")
+        pid = int(announced)
+        return holder, pid
+
+    def kill_holder(self, holder: subprocess.Popen, pid: int | None) -> None:
+        """Encerra o processo de forma abrupta, sem passar pelo __exit__."""
+        if pid is not None:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        holder.kill()
+        holder.wait(timeout=30)
+        for stream in (holder.stdout, holder.stderr):
+            if stream is not None:
+                stream.close()
+
+    def test_arquivo_orfao_com_pid_vivo_nao_impede_a_abertura(self):
+        data_dir = self.make_data_dir()
+        lock = bloqueio_dados.lock_path(data_dir)
+        # O PID deste próprio processo é o pior caso: está inegavelmente vivo,
+        # como ficava o PID reciclado, mas ninguém detém a reserva.
+        lock.write_text(str(os.getpid()), encoding="ascii")
+
+        with DataDirectoryLock(data_dir):
+            self.assertEqual(str(os.getpid()), lock.read_text(encoding="ascii").strip())
+        self.assertFalse(lock.exists())
+
+    def test_arquivo_orfao_ilegivel_nao_impede_a_abertura(self):
+        data_dir = self.make_data_dir()
+        lock = bloqueio_dados.lock_path(data_dir)
+        lock.write_bytes(b"nao-e-um-pid")
+
+        with DataDirectoryLock(data_dir):
+            self.assertTrue(lock.is_file())
+
+    def test_instancia_viva_impede_a_segunda_abertura(self):
+        data_dir = self.make_data_dir()
+        _, pid = self.start_holder(data_dir)
+
+        with self.assertRaisesRegex(SystemExit, f"Já existe uma instância.*PID {pid}"):
+            with DataDirectoryLock(data_dir):
+                self.fail("A segunda instância não poderia reservar o diretório.")
+
+        lock = bloqueio_dados.lock_path(data_dir)
+        self.assertEqual(str(pid), lock.read_text(encoding="ascii").strip())
+
+    def test_morte_do_processo_devolve_o_bloqueio_mesmo_com_o_arquivo_no_lugar(self):
+        data_dir = self.make_data_dir()
+        holder, pid = self.start_holder(data_dir)
+        lock = bloqueio_dados.lock_path(data_dir)
+
+        self.kill_holder(holder, pid)
+
+        # É este o estado que quebrava a abertura: arquivo presente, com o PID
+        # de uma execução encerrada de forma abrupta.
+        self.assertTrue(lock.is_file())
+        self.assertEqual(str(pid), lock.read_text(encoding="ascii").strip())
+        self.assertIsNone(bloqueio_dados.owner_pid(data_dir))
+        with DataDirectoryLock(data_dir):
+            self.assertEqual(str(os.getpid()), lock.read_text(encoding="ascii").strip())
+
+    def test_ensure_application_stopped_ignora_arquivo_orfao(self):
+        data_dir = self.make_data_dir()
+        bloqueio_dados.lock_path(data_dir).write_text(str(os.getpid()), encoding="ascii")
+
+        backup_restore.ensure_application_stopped(data_dir)
+
+    def test_ensure_application_stopped_recusa_com_a_aplicacao_viva(self):
+        data_dir = self.make_data_dir()
+        _, pid = self.start_holder(data_dir)
+
+        with self.assertRaisesRegex(RuntimeError, f"ainda está usando.*PID {pid}"):
+            backup_restore.ensure_application_stopped(data_dir)
+        self.assertEqual(pid, bloqueio_dados.owner_pid(data_dir))
+
+    def test_ensure_application_stopped_nao_cria_o_arquivo_de_bloqueio(self):
+        data_dir = self.make_data_dir()
+
+        backup_restore.ensure_application_stopped(data_dir)
+
+        # A restauração exige o destino vazio logo depois desta checagem.
+        self.assertEqual([], list(data_dir.iterdir()))
 
 if __name__ == "__main__":
     unittest.main()

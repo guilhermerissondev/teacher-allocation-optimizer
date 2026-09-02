@@ -123,7 +123,7 @@ class ProfileCoverageByCriterionTests(unittest.TestCase):
         self.assertEqual(
             CRITERION_CLUSTER_PURE, report.metadata["eligibility_criterion"]
         )
-        self.assertEqual("2.3", report.metadata["contract_version"])
+        self.assertEqual("2.4", report.metadata["contract_version"])
 
     def test_unknown_criterion_is_refused(self):
         with self.assertRaises(ValueError):

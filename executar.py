@@ -10,6 +10,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 
@@ -22,62 +23,41 @@ VERSION = (PACKAGE_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
 class DataDirectoryLock:
-    """Impede duas instâncias de escreverem no mesmo diretório operacional."""
+    """Impede duas instâncias de escreverem no mesmo diretório operacional.
+
+    A exclusão vem do bloqueio de arquivo do sistema operacional, que é
+    liberado sozinho quando o processo dono termina de qualquer maneira. Um
+    arquivo deixado para trás por um encerramento abrupto não impede mais a
+    próxima abertura da aplicação.
+    """
 
     def __init__(self, data_dir: Path) -> None:
+        self.data_dir = data_dir
         self.path = data_dir / ".aplicacao.lock"
-        self.file_descriptor: int | None = None
-
-    @staticmethod
-    def _process_is_running(pid: int) -> bool:
-        if pid <= 0:
-            return False
-        try:
-            os.kill(pid, 0)
-        except PermissionError:
-            return True
-        except OSError:
-            return False
-        return True
+        self._reservation: AbstractContextManager[Path] | None = None
 
     def __enter__(self) -> "DataDirectoryLock":
-        for _ in range(2):
-            try:
-                self.file_descriptor = os.open(
-                    self.path,
-                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                )
-            except FileExistsError:
-                try:
-                    owner = int(self.path.read_text(encoding="ascii").strip())
-                except (OSError, ValueError):
-                    owner = -1
-                if self._process_is_running(owner):
-                    raise SystemExit(
-                        "Já existe uma instância usando este diretório de dados "
-                        f"(PID {owner})."
-                    )
-                try:
-                    self.path.unlink()
-                except OSError as exc:
-                    raise SystemExit(
-                        "Não foi possível recuperar o bloqueio do diretório de dados."
-                    ) from exc
-                continue
-            os.write(self.file_descriptor, str(os.getpid()).encode("ascii"))
-            os.fsync(self.file_descriptor)
-            return self
-        raise SystemExit("Não foi possível reservar o diretório de dados.")
+        # Importado aqui, e não no topo, para que nenhum módulo do pacote seja
+        # carregado antes de check_package() conferir a integridade da release.
+        from scripts import bloqueio_dados
 
-    def __exit__(self, *_: object) -> None:
-        if self.file_descriptor is not None:
-            os.close(self.file_descriptor)
-            self.file_descriptor = None
+        reservation = bloqueio_dados.reserve(self.data_dir)
         try:
-            if self.path.read_text(encoding="ascii").strip() == str(os.getpid()):
-                self.path.unlink()
-        except OSError:
-            pass
+            reservation.__enter__()
+        except bloqueio_dados.LockBusy as exc:
+            raise SystemExit(
+                "Já existe uma instância usando este diretório de dados "
+                f"({bloqueio_dados.describe_owner(exc.pid)})."
+            ) from None
+        except bloqueio_dados.LockUnavailable as exc:
+            raise SystemExit(f"Não foi possível reservar o diretório de dados. {exc}") from None
+        self._reservation = reservation
+        return self
+
+    def __exit__(self, *exception: object) -> None:
+        reservation, self._reservation = self._reservation, None
+        if reservation is not None:
+            reservation.__exit__(None, None, None)
 
 
 def pasta_gravavel(directory: Path) -> bool:
@@ -148,14 +128,6 @@ def check_package() -> None:
     missing = [path.relative_to(PACKAGE_ROOT) for path in required if not path.is_file()]
     if missing:
         rendered = ", ".join(str(path) for path in missing)
-        # O build da interface não é versionado, então um clone recém-feito cai
-        # aqui. Apontar o script evita que a ausência pareça um pacote corrompido.
-        if Path("frontend") / "dist" / "index.html" in missing:
-            raise SystemExit(
-                f"Pacote incompleto. Arquivos ausentes: {rendered}\n"
-                "A interface ainda não foi compilada neste clone. "
-                "Execute scripts/construir_frontend.ps1 (requer Node.js 20.19+ ou 22.12+)."
-            )
         raise SystemExit(f"Pacote incompleto. Arquivos ausentes: {rendered}")
     supported_python = (
         sys.version_info.releaselevel == "final"
@@ -184,12 +156,21 @@ def port_is_available(host: str, port: int) -> bool:
 
 
 def open_when_ready(url: str) -> None:
+    """Abre a aplicacao no navegador padrao assim que a API responde.
+
+    O endereco leva um carimbo de abertura porque, com a URL identica a de uma
+    sessao anterior, o navegador apenas devolve o foco a aba ja aberta e mantem
+    a pagina antiga em memoria: quem acabou de atualizar a ferramenta continua
+    vendo a versao anterior sem nenhum aviso.
+    """
     health_url = f"{url}/api/health"
+    separador = "&" if "?" in url else "?"
+    endereco = f"{url}{separador}abertura={int(time.time())}"
     for _ in range(100):
         try:
             with urllib.request.urlopen(health_url, timeout=1) as response:
                 if response.status == 200:
-                    webbrowser.open(url)
+                    webbrowser.open(endereco)
                     return
         except OSError:
             time.sleep(0.2)

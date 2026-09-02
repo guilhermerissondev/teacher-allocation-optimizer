@@ -240,18 +240,27 @@ class BackendApiTests(unittest.TestCase):
         catalog = self.client.get(f"/api/scenarios/{scenario_id}/catalog")
         self.assertEqual(200, catalog.status_code)
         self.assertEqual([2], [item["row_number"] for item in catalog.json()["offers"]])
-        change = self.client.post(f"/api/scenarios/{scenario_id}/changes", json={
+        change = self.client.post(f"/api/scenarios/{scenario_id}/changes/batch", json={
             "change_type": "CAPACIDADE", "entity_type": "teacher",
-            "row_number": 2, "field_name": "CH_LETIVA", "new_value": 12,
+            "row_numbers": [2], "field_name": "CH_LETIVA", "new_value": 12,
         })
-        self.assertEqual(201, change.status_code)
-        change_id = change.json()["id"]
-        rejected_supporting_row = self.client.post(f"/api/scenarios/{scenario_id}/changes", json={
-            "change_type": "AGENDA", "entity_type": "offer",
-            "row_number": 3, "field_name": "DIA_AULA", "new_value": "TERÇA",
-        })
+        self.assertEqual(201, change.status_code, change.text)
+        self.assertEqual(1, change.json()["applied_count"])
+        change_id = change.json()["applied"][0]["id"]
+        # Uma linha fora do conjunto que o solver trata e recusada, mesmo
+        # quando vem sozinha: o lote nao afrouxa a validacao do alvo.
+        rejected_supporting_row = self.client.post(
+            f"/api/scenarios/{scenario_id}/changes/batch",
+            json={
+                "change_type": "AGENDA", "entity_type": "offer",
+                "row_numbers": [3], "field_name": "DIA_AULA", "new_value": "TERÇA",
+            },
+        )
         self.assertEqual(409, rejected_supporting_row.status_code)
-        self.assertIn("ofertas tratadas pelo solver", rejected_supporting_row.json()["detail"])
+        self.assertIn(
+            "fora do conjunto tratado pelo solver",
+            rejected_supporting_row.json()["detail"],
+        )
         policy = self.client.post(f"/api/scenarios/{scenario_id}/policies", json={
             "policy_type": "ALOCAR_CLUSTER", "target_type": "CLUSTER",
             "target_value": "GESTÃO E NEGÓCIOS", "configuration": {},
@@ -787,6 +796,178 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(409, tampered.status_code)
         self.assertIn("manifesto", tampered.json()["detail"])
 
+    def _scenario_with_many_teachers(self) -> str:
+        """Cenário com um corpo docente variado, para exercitar o lote."""
+        source = self.data_dir / "lote.xlsx"
+        workbook = Workbook()
+        teachers = workbook.active
+        teachers.title = "DOCENTES"
+        teachers.append([
+            "CHAPA", "NOME", "NM_FUNCAO", "CH_CONTRATADA", "CH_LETIVA",
+            "STATUS", "PERFIL_DISCIPLINA",
+        ])
+        # linha 2..7: funções, cargas e status deliberadamente diferentes.
+        teachers.append(["100", "Ana", "PROFESSOR REGENTE", 40, 8, "ATIVO", "GESTÃO"])
+        teachers.append(["101", "Bruno", "PROFESSOR REGENTE", 40, 4, "ATIVO", "GESTÃO"])
+        teachers.append(["102", "Carla", "PROFESSOR DE ENSINO SUPERIOR EAD", 40, 12, "ATIVO", "GESTÃO"])
+        teachers.append(["103", "Davi", "PROFESSOR DE ENSINO SUPERIOR PRESENCIAL", 20, 0, "ATIVO", "GESTÃO"])
+        teachers.append(["104", "Elis", "PROFESSOR REGENTE", 10, 10, "DEMITIDO", "GESTÃO"])
+        offers = workbook.create_sheet("MAPA PEDAGÓGICO")
+        offers.append([
+            "CURSO", "NOME_CURSO", "COD_DISCIPLINA", "NOME_DISCIPLINA",
+            "DIA_AULA", "HORÁRIO", "ORDEM", "PERFIL_DISCIPLINA", "CLUSTER",
+            "SINERGIA", "FORMATO_AULA",
+        ])
+        offers.append(["ADM", "Administração", "ADM01", "Gestão", "SEGUNDA", "19:00", "1ª", "GESTÃO", "GESTÃO E NEGÓCIOS", "Curso único", "Ao vivo"])
+        workbook.save(source)
+        workbook.close()
+
+        round_dir = self.data_dir / "rodada_lote"
+        source_copy = round_dir / "fonte" / source.name
+        summary_path = round_dir / "alocacao" / "resumo_alocacao.json"
+        source_copy.parent.mkdir(parents=True)
+        summary_path.parent.mkdir(parents=True)
+        shutil.copy2(source, source_copy)
+        summary_path.write_text(
+            json.dumps({
+                "transmissions": 1, "allocated": 0, "unassigned": 1,
+                "hours_per_transmission": 2,
+                "decisions": [{
+                    "source_row": 2, "status": "NAO_ALOCADA",
+                    "discipline_code": "ADM01", "discipline_name": "Gestão",
+                    "teacher_badge": None, "teacher_name": None,
+                }],
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        _write_manifest(
+            round_dir, {"source_copy": source_copy, "allocation_summary": summary_path}
+        )
+        now = "2026-07-15T00:00:00+00:00"
+        database = self.app.state.database
+        database.create_upload({
+            "id": "upload-lote", "original_name": source.name,
+            "stored_path": str(source), "module": 52,
+            "validation_status": "APROVADO",
+            "validation_path": str(self.data_dir / "v.json"),
+            "validation_csv_path": str(self.data_dir / "v.xlsx"),
+            "created_at": now,
+        })
+        database.create_job({
+            "id": "baseline-lote", "upload_id": "upload-lote",
+            "status": "CONCLUIDA", "message": "ok", "module": 52,
+            "require_optimal": True, "time_limit_seconds": None,
+            "created_at": now, "updated_at": now,
+        })
+        database.update_job(
+            "baseline-lote", round_name="rodada_001", round_dir=str(round_dir)
+        )
+        created = self.client.post("/api/scenarios", json={
+            "baseline_job_id": "baseline-lote",
+            "name": "Reforço em lote",
+            "description": "Aplicar a mesma premissa a vários docentes de uma vez.",
+        })
+        self.assertEqual(201, created.status_code)
+        return created.json()["id"]
+
+    def test_batch_change_applies_absolute_value_to_every_selected_row(self) -> None:
+        scenario_id = self._scenario_with_many_teachers()
+        catalog = self.client.get(f"/api/scenarios/{scenario_id}/catalog").json()
+        # A CH contratada precisa chegar ao catálogo: é o teto que o lote respeita.
+        self.assertEqual(
+            [40, 40, 40, 20, 10],
+            [item["contracted_capacity"] for item in catalog["teachers"]],
+        )
+
+        response = self.client.post(
+            f"/api/scenarios/{scenario_id}/changes/batch",
+            json={
+                "change_type": "CAPACIDADE", "entity_type": "teacher",
+                "field_name": "STATUS", "new_value": "DEMITIDO",
+                "row_numbers": [2, 3, 6],
+            },
+        )
+        self.assertEqual(201, response.status_code)
+        payload = response.json()
+        # Elis (linha 6) já está DEMITIDO: o lote não repete o que não muda.
+        self.assertEqual(2, payload["applied_count"])
+        self.assertEqual(1, payload["skipped_count"])
+        self.assertEqual([6], [item["row_number"] for item in payload["skipped"]])
+        self.assertIn("já está nesse valor", payload["skipped"][0]["reason"])
+        self.assertEqual([2, 3], sorted(item["row_number"] for item in payload["applied"]))
+        self.assertEqual(
+            {"DEMITIDO"}, {item["new_value"] for item in payload["applied"]}
+        )
+
+        scenario = self.client.get(f"/api/scenarios/{scenario_id}").json()
+        self.assertEqual(2, len(scenario["changes"]))
+
+    def test_batch_change_adjusts_ch_letiva_preserving_differences(self) -> None:
+        scenario_id = self._scenario_with_many_teachers()
+        response = self.client.post(
+            f"/api/scenarios/{scenario_id}/changes/batch",
+            json={
+                "change_type": "CAPACIDADE", "entity_type": "teacher",
+                "field_name": "CH_LETIVA", "adjustment": 2,
+                "row_numbers": [2, 3, 4, 5, 6],
+            },
+        )
+        self.assertEqual(201, response.status_code)
+        payload = response.json()
+        applied = {item["row_number"]: item["new_value"] for item in payload["applied"]}
+        # Cada docente sobe 2h a partir da SUA carga, e não para um valor comum.
+        self.assertEqual({2: 10, 3: 6, 4: 14, 5: 2}, applied)
+        # Elis tem CH_LETIVA 10 e CH_CONTRATADA 10: subir reprovaria a validação.
+        self.assertEqual([6], [item["row_number"] for item in payload["skipped"]])
+        self.assertIn("CH contratada", payload["skipped"][0]["reason"])
+
+    def test_batch_change_refuses_negative_result_and_invalid_combinations(self) -> None:
+        scenario_id = self._scenario_with_many_teachers()
+        negative = self.client.post(
+            f"/api/scenarios/{scenario_id}/changes/batch",
+            json={
+                "change_type": "CAPACIDADE", "entity_type": "teacher",
+                "field_name": "CH_LETIVA", "adjustment": -6,
+                "row_numbers": [2, 3, 5],
+            },
+        )
+        self.assertEqual(201, negative.status_code)
+        payload = negative.json()
+        # Ana 8-6=2 aplica; Bruno 4-6=-2 e Davi 0-6=-6 são recusados.
+        self.assertEqual({2: 2}, {i["row_number"]: i["new_value"] for i in payload["applied"]})
+        self.assertEqual([3, 5], sorted(i["row_number"] for i in payload["skipped"]))
+
+        wrong_field = self.client.post(
+            f"/api/scenarios/{scenario_id}/changes/batch",
+            json={
+                "change_type": "CAPACIDADE", "entity_type": "teacher",
+                "field_name": "STATUS", "adjustment": 2, "row_numbers": [2],
+            },
+        )
+        self.assertEqual(409, wrong_field.status_code)
+        self.assertIn("CH_LETIVA", wrong_field.json()["detail"])
+
+        outside_contract = self.client.post(
+            f"/api/scenarios/{scenario_id}/changes/batch",
+            json={
+                "change_type": "AGENDA", "entity_type": "teacher",
+                "field_name": "DIA_AULA", "new_value": "TERÇA", "row_numbers": [2],
+            },
+        )
+        self.assertEqual(409, outside_contract.status_code)
+        self.assertIn("contrato de cenários", outside_contract.json()["detail"])
+
+        unknown_row = self.client.post(
+            f"/api/scenarios/{scenario_id}/changes/batch",
+            json={
+                "change_type": "CAPACIDADE", "entity_type": "teacher",
+                "field_name": "STATUS", "new_value": "DEMITIDO",
+                "row_numbers": [2, 999],
+            },
+        )
+        self.assertEqual(409, unknown_row.status_code)
+        self.assertIn("999", unknown_row.json()["detail"])
+
 
 class SecurityMiddlewareTests(unittest.TestCase):
     def test_streamed_body_without_content_length_is_still_limited(self) -> None:
@@ -1132,6 +1313,147 @@ class InsightsContractTests(unittest.TestCase):
                 _, job = self._round_with_hours(hours)
                 result = build_insights(job)
                 self.assertEqual(2, result["kpis"]["hours_per_transmission"])
+
+
+
+class InsightSeverityTests(unittest.TestCase):
+    """Severidade e orientacao dos cartoes de oportunidade.
+
+    O cartao existe para dizer o que fazer. Quando o indicador zera, insistir no
+    mesmo texto de acao treina o operador a ignorar a tela — por isso a
+    severidade e o texto saem dos numeros da rodada, nao do tema do cartao.
+    """
+
+    def _insights(
+        self,
+        *,
+        alocadas: int,
+        nao_alocadas: int,
+        docentes_ociosos: int,
+        contrato: str = "CLT EAD",
+    ) -> dict:
+        round_dir = REPO_ROOT / "data" / "test_runs" / uuid.uuid4().hex
+        allocation_dir = round_dir / "alocacao"
+        allocation_dir.mkdir(parents=True, exist_ok=False)
+        self.addCleanup(shutil.rmtree, round_dir, True)
+
+        workbook = Workbook()
+        allocations = workbook.active
+        allocations.title = "ALOCACOES"
+        allocations.append([
+            "STATUS", "MOTIVO", "ORDEM", "CLUSTER", "COORDENADOR",
+            "MODELO_CONTRATO", "DOCENTE", "DIA_AULA", "CANDIDATOS_ELEGÍVEIS",
+            "CURSO", "NOME_CURSO", "HORÁRIO", "PERFIL_DISCIPLINA",
+        ])
+        for indice in range(alocadas):
+            allocations.append([
+                "ALOCADA", None, "1ª", "CLUSTER 1", "GESTOR", contrato,
+                f"Docente {indice}", "SEGUNDA", 3, "CURSO 1", "Curso 1",
+                "19:00", "PERFIL 1",
+            ])
+        for _ in range(nao_alocadas):
+            allocations.append([
+                "NAO_ALOCADA", "SEM_CANDIDATO", "1ª", "CLUSTER 2", "GESTOR",
+                "CLT EAD", None, "SEXTA", 0, "CURSO 2", "Curso 2",
+                "21:00", "PERFIL 2",
+            ])
+
+        teachers = workbook.create_sheet("DOCENTES")
+        teachers.append([
+            "NOME", "NM_FUNCAO", "STATUS", "QTD_TRANSMISSÕES",
+            "CH_DISPONÍVEL", "UTILIZAÇÃO_1ª_ETAPA", "UTILIZAÇÃO_2ª_ETAPA",
+        ])
+        for indice in range(alocadas):
+            teachers.append([f"Docente {indice}", "PROFESSOR", "ATIVO", 1, 2, .5, .5])
+        for indice in range(docentes_ociosos):
+            teachers.append([f"Ocioso {indice}", "PROFESSOR", "ATIVO", 0, 20, 0, 0])
+        workbook.save(allocation_dir / "resultado_alocacao.xlsx")
+        _write_manifest(
+            round_dir,
+            {"allocation_workbook": allocation_dir / "resultado_alocacao.xlsx"},
+        )
+        return build_insights({
+            "id": "job-sev", "upload_id": "upload-1", "original_name": "base.xlsx",
+            "module": 52, "status": "CONCLUIDA", "message": "ok",
+            "validation_status": "APROVADO", "require_optimal": 1,
+            "time_limit_seconds": None, "round_name": "rodada_001",
+            "round_dir": str(round_dir), "exit_code": 0,
+            "created_at": "2026-07-14T00:00:00+00:00",
+            "updated_at": "2026-07-14T00:00:01+00:00",
+        })
+
+    @staticmethod
+    def _cartao(resultado: dict, kind: str) -> dict:
+        return next(item for item in resultado["opportunities"] if item["kind"] == kind)
+
+    def test_cobertura_completa_encerra_o_cartao_em_vez_de_pedir_acao(self) -> None:
+        resultado = self._insights(alocadas=4, nao_alocadas=0, docentes_ociosos=0)
+
+        cobertura = self._cartao(resultado, "coverage")
+        self.assertEqual("resolvido", cobertura["severity"])
+        self.assertEqual("Nenhuma lacuna", cobertura["metric"])
+        # A acao nao pode mandar atacar um problema que nao existe.
+        self.assertNotIn("Atacar", cobertura["action"])
+
+    def test_lacuna_aberta_torna_a_cobertura_critica_e_cita_as_disciplinas(self) -> None:
+        resultado = self._insights(alocadas=4, nao_alocadas=2, docentes_ociosos=0)
+
+        cobertura = self._cartao(resultado, "coverage")
+        # A disciplina do CURSO 2 ficou com cobertura zero.
+        self.assertEqual("critica", cobertura["severity"])
+        self.assertIn("4h de demanda", cobertura["metric"])
+        self.assertIn("cobertura zero", cobertura["impact"])
+
+    def test_ocioso_com_lacuna_aberta_e_acionavel_ocioso_sem_lacuna_e_so_registro(self) -> None:
+        com_lacuna = self._cartao(
+            self._insights(alocadas=4, nao_alocadas=2, docentes_ociosos=3), "capacity"
+        )
+        sem_lacuna = self._cartao(
+            self._insights(alocadas=4, nao_alocadas=0, docentes_ociosos=3), "capacity"
+        )
+
+        # O mesmo numero de ociosos muda de significado conforme haja lacuna.
+        self.assertEqual("alta", com_lacuna["severity"])
+        self.assertIn("a capacidade existe", com_lacuna["impact"])
+        self.assertEqual("monitorar", sem_lacuna["severity"])
+        self.assertIn("cobertura já completa", sem_lacuna["impact"])
+        self.assertEqual(
+            com_lacuna["metric"], sem_lacuna["metric"], "a metrica bruta e a mesma"
+        )
+
+    def test_sem_docente_ocioso_o_cartao_de_capacidade_se_encerra(self) -> None:
+        capacidade = self._cartao(
+            self._insights(alocadas=4, nao_alocadas=0, docentes_ociosos=0), "capacity"
+        )
+        self.assertEqual("resolvido", capacidade["severity"])
+
+    def test_hora_externa_acima_de_zero_pede_atencao_e_nao_urgencia(self) -> None:
+        com_rpa = self._cartao(
+            self._insights(alocadas=4, nao_alocadas=0, docentes_ociosos=0, contrato="RPA"),
+            "cost",
+        )
+        sem_rpa = self._cartao(
+            self._insights(alocadas=4, nao_alocadas=0, docentes_ociosos=0), "cost"
+        )
+
+        self.assertEqual("media", com_rpa["severity"])
+        self.assertEqual("8h alocadas", com_rpa["metric"])
+        self.assertEqual("resolvido", sem_rpa["severity"])
+        self.assertEqual("Nenhuma hora externa", sem_rpa["metric"])
+
+    def test_toda_oportunidade_traz_severidade_e_rotulo_coerentes(self) -> None:
+        resultado = self._insights(alocadas=4, nao_alocadas=1, docentes_ociosos=2)
+
+        rotulos = {
+            "critica": "Crítica", "alta": "Alta", "media": "Média",
+            "monitorar": "Monitorar", "resolvido": "Sem ação",
+        }
+        self.assertEqual(4, len(resultado["opportunities"]))
+        for item in resultado["opportunities"]:
+            self.assertIn(item["severity"], rotulos, item["kind"])
+            self.assertEqual(rotulos[item["severity"]], item["priority"], item["kind"])
+            self.assertTrue(item["impact"].strip(), item["kind"])
+            self.assertTrue(item["action"].strip(), item["kind"])
 
 
 if __name__ == "__main__":

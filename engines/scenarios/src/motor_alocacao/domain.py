@@ -15,21 +15,31 @@ MODULE_STAGE_1 = "PRIMEIRA_ETAPA"
 MODULE_STAGE_2 = "SEGUNDA_ETAPA"
 MODULE_STAGES = (MODULE_STAGE_1, MODULE_STAGE_2)
 
+ORDER_FIRST = "1ª"
+ORDER_SECOND = "2ª"
+ORDER_EXTENDED = "ESTENDIDA"
+MODULE_ORDERS = (ORDER_FIRST, ORDER_SECOND, ORDER_EXTENDED)
+
+_ORDER_STAGES = {
+    ORDER_FIRST: (MODULE_STAGE_1,),
+    ORDER_SECOND: (MODULE_STAGE_2,),
+    ORDER_EXTENDED: MODULE_STAGES,
+}
+
+
+def normalize_order(order: str) -> str:
+    """Devolve a ORDEM canonica da disciplina."""
+    normalized = " ".join(order.strip().upper().split())
+    if normalized not in _ORDER_STAGES:
+        raise ValueError(
+            f"ORDEM não suportada: {order!r}; esperado 1ª, 2ª ou ESTENDIDA."
+        )
+    return normalized
+
 
 def module_stages_for_order(order: str) -> tuple[str, ...]:
     """Retorna as metades do módulo em que a disciplina consome carga."""
-    normalized = " ".join(order.strip().upper().split())
-    mapping = {
-        "1ª": (MODULE_STAGE_1,),
-        "2ª": (MODULE_STAGE_2,),
-        "ESTENDIDA": MODULE_STAGES,
-    }
-    try:
-        return mapping[normalized]
-    except KeyError as exc:
-        raise ValueError(
-            f"ORDEM não suportada: {order!r}; esperado 1ª, 2ª ou ESTENDIDA."
-        ) from exc
+    return _ORDER_STAGES[normalize_order(order)]
 
 
 @dataclass(frozen=True)
@@ -44,6 +54,11 @@ class Teacher:
     status: str
     profiles: frozenset[str]
     profile_text: str
+    # Clusters declarados para o docente. Quando a base os informa, eles
+    # passam a ser a referencia dos metodos por cluster, no lugar da uniao de
+    # perfis das ofertas — que dependia da taxonomia de perfil estar coerente.
+    clusters: frozenset[str] = frozenset()
+    cluster_text: str = ""
 
     @property
     def is_active(self) -> bool:
@@ -70,6 +85,22 @@ class Teacher:
         if self.is_stricto:
             return hours_per_transmission * STRICTO_MAX_DISCIPLINES_PER_MODULE
         return self.teaching_capacity
+
+    def allocatable_capacity(self, hours_per_transmission: int) -> int:
+        """CH letiva que cabe em transmissões inteiras.
+
+        A alocação acontece em blocos de hours_per_transmission, então a sobra
+        que não fecha um bloco não tem como ser usada: 9h de CH letiva com
+        blocos de 2h alocam no máximo 8h, e a hora restante fica ociosa por
+        construção. Medir utilização contra as 9h originais faz o docente
+        parecer menos usado do que o teto real permite.
+
+        O solver não muda com isso — a restrição de inteiros já produzia o
+        mesmo piso —, mas o denominador dos relatórios sim.
+        """
+        if hours_per_transmission <= 0:
+            return self.teaching_capacity
+        return (self.teaching_capacity // hours_per_transmission) * hours_per_transmission
 
 
 @dataclass(frozen=True)
@@ -99,6 +130,10 @@ class Transmission:
     @property
     def module_stages(self) -> tuple[str, ...]:
         return module_stages_for_order(self.order)
+
+    @property
+    def normalized_order(self) -> str:
+        return normalize_order(self.order)
 
 @dataclass(frozen=True)
 class Problem:

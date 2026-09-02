@@ -66,6 +66,10 @@
    sobre a superfície de cada tema.
    ─────────────────────────────────────────────────────────────── */
 :root {
+  /* Sem carimbo de tema vale a preferência do sistema, e os controles
+     nativos — radio, select, barra de rolagem — seguem junto. Os dois
+     blocos [data-theme] abaixo fecham o par: sem eles a escolha manual
+     troca a paleta mas deixa os controles do navegador no tema do SO. */
   color-scheme: light dark;
 
   --ground: #f4f5f1;
@@ -180,6 +184,8 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
+
   --ground: #061c21;
   --paper: #0d2e35;
   --surface: #0d2e35;
@@ -224,6 +230,10 @@
   --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 10px 26px rgba(0, 0, 0, .35);
   --shadow-lg: 0 6px 14px rgba(0, 0, 0, .5), 0 24px 56px rgba(0, 0, 0, .45);
   --ring: rgba(50, 175, 182, .38);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 /* ── Base ────────────────────────────────────────────────────── */
@@ -363,8 +373,11 @@ table, .kpi-card strong, .validation-summary strong, .pagination, .job-meta { fo
 .page-container, .page-stack { width: min(1380px, calc(100% - 40px)); margin: 0 auto; padding: 36px 0 72px; }
 .page-heading, .page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 28px; margin-bottom: 30px; }
 .page-heading > *, .page-header > * { min-width: 0; }
+/* Sem font-family aqui de propósito: estes títulos herdam --font-display da
+   regra de h1–h4. A pilha "Ubuntu, Segoe UI" que existia neste ponto não era
+   empacotada e, numa aplicação offline, caía direto na fonte do sistema —
+   os títulos de página saíam em Segoe UI e só eles ficavam fora da Sora. */
 .page-heading h1, .page-header h1, .section-title h2, .scenario-card h2, .empty-state h2 {
-  font-family: "Ubuntu", "Segoe UI", sans-serif;
   color: var(--ink);
 }
 .page-heading h1, .page-header h1 { margin: 4px 0 8px; font-size: clamp(28px, 4vw, 42px); letter-spacing: -0.045em; }
@@ -388,9 +401,9 @@ select, input[type="number"], input[type="text"], input[type="search"], .table-t
   border: 1px solid var(--line-strong);
   border-radius: 9px;
 }
-.upload-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 0.8fr); gap: 22px; }
+.upload-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(220px, 0.8fr); gap: 22px; align-items: stretch; }
 .dropzone {
-  min-height: 190px;
+  /* A altura fica na segunda regra .dropzone deste arquivo, que vence esta. */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -501,7 +514,7 @@ td small { display: block; margin-top: 4px; color: var(--muted); }
 .kpi-card.featured { color: var(--on-dark); background: var(--brand-dark); border-color: var(--brand-dark); }
 .kpi-card > span { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 .kpi-card.featured > span, .kpi-card.featured small { color: var(--on-dark-muted); }
-.kpi-card strong { margin: 6px 0 5px; color: var(--ink); font: 800 clamp(28px, 4vw, 38px) "Ubuntu", "Segoe UI", sans-serif; letter-spacing: -0.04em; }
+.kpi-card strong { margin: 6px 0 5px; color: var(--ink); font: 800 clamp(28px, 4vw, 38px) var(--font-display); letter-spacing: -0.04em; }
 .kpi-card.featured strong { color: var(--brand-accent); }
 .kpi-card small { color: var(--muted); }
 .downloads { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 20px 0 30px; padding: 14px 16px; background: var(--surface-sunken); border-radius: 10px; }
@@ -525,12 +538,13 @@ td small { display: block; margin-top: 4px; color: var(--muted); }
 .confidence-strip strong.is-warning { color: var(--warning); }
 .confidence-strip strong.is-critical { color: var(--critical); }
 .confidence-strip strong.is-info { color: var(--info); }
-.dashboard-kpis { margin-bottom: 24px; }
 .dashboard-grid { display: grid; grid-template-columns: 1.35fr 0.65fr; gap: 24px; }
 .chart-panel { min-height: 330px; margin: 0; }
 .bar-chart { display: flex; flex-direction: column; gap: 21px; padding-top: 10px; }
 .bar-row > div:first-child { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 7px; }
-.bar-row span { font-size: 12px; text-transform: capitalize; }
+/* Sem text-transform: os rótulos já chegam escritos por labelReason, e
+   capitalize subia preposição e conjunção — "Sem Docente Com Perfil E Carga". */
+.bar-row span { font-size: 12px; }
 .bar-row strong { color: var(--ink); }
 .bar-track { height: 11px; overflow: hidden; background: var(--surface-sunken); border-radius: 999px; }
 .bar-track span { display: block; height: 100%; background: var(--series-1); border-radius: inherit; }
@@ -600,7 +614,6 @@ td small { display: block; margin-top: 4px; color: var(--muted); }
   .page-heading { align-items: stretch; flex-direction: column; }
   .upload-grid, .dashboard-grid, .scenario-intro, .insight-grid { grid-template-columns: 1fr; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
-  .delta-kpi { grid-column: auto; }
   .scenario-grid { grid-template-columns: 1fr; }
   .insight-narratives { grid-template-columns: 1fr; }
   .comparison-preview { grid-template-columns: 1fr; }
@@ -645,7 +658,8 @@ td small { display: block; margin-top: 4px; color: var(--muted); }
 .mini-spinner, .stage-spinner { border: 2px solid var(--accent-edge); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 .mini-spinner { width: 18px; height: 18px; }
 .multi-filter { min-width: 0; margin: 0 0 14px; padding: 0; border: 0; }
-.multi-filter legend { margin-bottom: 7px; color: var(--ink-soft); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+/* Mesmo tratamento de .compact-field span: rótulo de campo é texto, não versalete. */
+.multi-filter legend { margin-bottom: 7px; color: var(--ink-soft); font-size: 12.5px; font-weight: 600; letter-spacing: .04em; }
 .multi-filter details { position: relative; }
 .multi-filter summary { min-height: 44px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px 34px 8px 11px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 9px; cursor: pointer; list-style: none; }
 .multi-filter summary::-webkit-details-marker { display: none; }
@@ -674,8 +688,6 @@ td small { display: block; margin-top: 4px; color: var(--muted); }
 .dashboard-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .dashboard-charts .chart-panel { min-height: 370px; }
 .section-title p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
-.order-kpi { grid-column: span 2; }
-.delta-kpi { grid-column: span 2; }
 .order-values { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 13px 0 8px; }
 .order-values b { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 5px; padding: 9px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; font-size: 11.5px; text-transform: uppercase; }
 .order-values em { color: var(--ink); font-size: 17px; font-style: normal; }
@@ -729,17 +741,30 @@ td small { display: block; margin-top: 4px; color: var(--muted); }
 @keyframes currentStep { 50% { box-shadow: 0 0 0 9px var(--accent-wash); } }
 
 /* Insights de cobertura e eficiência */
-.opportunity-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 24px; }
+.opportunity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 18px; }
 .opportunity-card { min-height: 225px; display: flex; flex-direction: column; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--info); border-radius: 13px; box-shadow: var(--shadow); }
 .opportunity-card .priority { display: block; margin-bottom: 8px; color: var(--info); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .opportunity-card div > strong { color: var(--ink); font-size: 14px; }
 .opportunity-card > b { margin: 20px 0 7px; color: var(--info); font-size: 24px; }
 .opportunity-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .opportunity-card footer { margin-top: auto; padding-top: 14px; color: var(--ink-soft); border-top: 1px solid var(--grid); font-size: 11.5px; line-height: 1.45; }
-.opportunity-card.coverage { border-top-color: var(--critical); }.opportunity-card.coverage .priority, .opportunity-card.coverage > b { color: var(--critical); }
-.opportunity-card.scarcity { border-top-color: var(--warning); }.opportunity-card.scarcity .priority, .opportunity-card.scarcity > b { color: var(--warning); }
-.opportunity-card.capacity { border-top-color: var(--info); }
-.opportunity-card.cost { border-top-color: var(--neutral); }.opportunity-card.cost .priority, .opportunity-card.cost > b { color: var(--neutral); }
+/* A cor do cartao sai da urgencia apurada na rodada, nao do assunto dele: um
+   cartao de cobertura sem lacuna nenhuma nao pode continuar vermelho. */
+.opportunity-card.sev-critica { border-top-color: var(--critical); }
+.opportunity-card.sev-critica .priority, .opportunity-card.sev-critica > b { color: var(--critical); }
+.opportunity-card.sev-alta { border-top-color: var(--critical); }
+.opportunity-card.sev-alta .priority, .opportunity-card.sev-alta > b { color: var(--critical); }
+.opportunity-card.sev-media { border-top-color: var(--warning); }
+.opportunity-card.sev-media .priority, .opportunity-card.sev-media > b { color: var(--warning); }
+.opportunity-card.sev-monitorar { border-top-color: var(--info); }
+.opportunity-card.sev-monitorar .priority, .opportunity-card.sev-monitorar > b { color: var(--info); }
+/* Resolvido: verde discreto e sem peso visual, para nao competir com o que
+   realmente exige acao. */
+.opportunity-card.sev-resolvido { border-top-color: var(--success); background: var(--success-soft); }
+.opportunity-card.sev-resolvido .priority, .opportunity-card.sev-resolvido > b { color: var(--success); }
+.opportunity-card.sev-resolvido > b { font-size: 19px; }
+/* Critica ganha um reforco alem da cor, para nao depender so dela. */
+.opportunity-card.sev-critica { border-top-width: 6px; box-shadow: var(--shadow), inset 0 0 0 1px var(--critical); }
 .coverage-grid { grid-template-columns: 1.35fr .65fr; }
 .coverage-legend { display: flex; justify-content: flex-end; gap: 16px; margin: -10px 0 18px; color: var(--muted); font-size: 11.5px; }
 .coverage-legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -865,7 +890,6 @@ td small { display: block; margin-top: 4px; color: var(--muted); }
 
 @media (max-width: 640px) {
   .filter-sidebar { grid-template-columns: 1fr; }
-  .order-kpi, .delta-kpi { grid-column: auto; }
   .active-filter-strip { grid-template-columns: 1fr; }
   .active-filter-strip .clear-all { justify-self: start; }
   .donut-legend-row { gap: 4px; }
@@ -923,18 +947,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .cluster-bar-track { height: 11px; overflow: hidden; background: var(--grid); border-radius: 999px; }
 .cluster-bar-track span { display: block; height: 100%; background: var(--series-1); border-right: 1px solid var(--surface); border-radius: inherit; }
 
-.stage-coverage-list { display: flex; flex-direction: column; gap: 18px; margin-top: 28px; }
-.stage-coverage-row { padding: 17px; background: var(--surface-sunken); border: 1px solid var(--line); border-radius: 11px; }
-.stage-coverage-heading, .stage-coverage-values { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.stage-coverage-heading strong { color: var(--ink); font-size: 13px; }
-.stage-coverage-heading span { font-size: 12px; font-weight: 800; }
-.stage-coverage-heading .is-covered { color: var(--info); }
-.stage-coverage-heading .has-gap { color: var(--warning); }
-.stage-coverage-values { justify-content: flex-start; margin: 11px 0 9px; }
-.stage-coverage-values span { color: var(--muted); font-size: 12px; }
-.stage-coverage-values b { margin-left: 4px; color: var(--ink); font-variant-numeric: tabular-nums; }
-.stage-coverage-track { height: 12px; overflow: hidden; background: var(--line); border-radius: 999px; }
-.stage-coverage-track span { display: block; height: 100%; background: var(--series-1); border-radius: inherit; }
 
 .scenario-readonly-notice { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 18px 22px; color: var(--ink); background: var(--info-soft); border: 1px solid var(--accent-edge); border-left: 4px solid var(--info); border-radius: 12px; }
 .scenario-readonly-notice > div > strong { display: block; margin-top: 4px; font-size: 15px; }
@@ -1021,7 +1033,6 @@ select, input, textarea, .button { min-width: 0; max-width: 100%; }
   .section-title { flex-wrap: wrap; gap: 12px; }
   .section-title > .button { flex: 1 1 100%; }
   .chart-legend, .coverage-legend { justify-content: flex-start; flex-wrap: wrap; margin-top: 0; }
-  .stage-coverage-heading, .stage-coverage-values { flex-wrap: wrap; }
   .scenario-builder-preview > .button,
   .scenario-readonly-notice > .button,
   .scenario-promotion > .button,
@@ -1186,8 +1197,6 @@ select, input, textarea, .button { min-width: 0; max-width: 100%; }
   .executive-moves button { min-height: auto; padding: 16px; }
   .scenario-promotion { padding: 18px; }
   .scenario-run-state { align-items: flex-start; }
-  .stage-coverage-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
-  .stage-coverage-values { gap: 7px 14px; }
 }
 
 /* Explicação do critério de elegibilidade escolhido na importação. */
@@ -1296,7 +1305,11 @@ select:focus, input:focus { border-color: var(--accent); }
 .status-badge.status-neutral { color: var(--muted); background: var(--neutral-soft); }
 
 .dropzone {
-  min-height: 176px;
+  /* Regra vencedora do arquivo: a altura precisa ser definida aqui.
+     Sem teto, para o alvo de arraste acompanhar a coluna de opcoes ao lado e
+     as duas metades do passo 1 fecharem na mesma linha. */
+  min-height: 420px;
+  align-self: stretch;
   border: 1.5px dashed var(--line-strong);
   border-radius: var(--r-md);
   background: var(--surface-sunken);
@@ -1353,9 +1366,9 @@ td { padding: 12px 14px; border-bottom: 1px solid var(--line); }
 /* Cada marca declara a propria serie na regra de origem. Redeclarar aqui foi
    o que permitiu, antes, que legenda e barra divergissem. */
 .diagnostic-track > span { background: var(--series-1); }
-.bar-track, .cluster-bar-track, .coverage-track, .stage-coverage-track, .diagnostic-track { background: var(--grid); border-radius: var(--r-pill); }
+.bar-track, .cluster-bar-track, .coverage-track, .stage-track, .diagnostic-track { background: var(--grid); border-radius: var(--r-pill); }
 .bar-track > span, .cluster-bar-track > span, .coverage-track > span,
-.stage-coverage-track > span, .diagnostic-track > span { border-radius: var(--r-pill); }
+.stage-track > span, .diagnostic-track > span { border-radius: var(--r-pill); }
 .day-bars span { border-radius: 4px 4px 0 0; }
 .chart-note, .source-note, .filter-footnote { font-size: 12.5px; color: var(--muted); }
 
@@ -1495,7 +1508,7 @@ td { padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .bar-track > span,
 .cluster-bar-track > span,
 .coverage-track > span,
-.stage-coverage-track > span,
+.stage-track > span,
 .diagnostic-track > span {
   transform-origin: left center;
   animation: crescer-horizontal 420ms var(--ease) both;
@@ -1527,7 +1540,7 @@ td { padding: 12px 14px; border-bottom: 1px solid var(--line); }
   .route-frame,
   .kpi-grid > *, .insight-kpis > *, .scenario-kpis > *, .export-kpi-grid > *,
   .bar-track > span, .cluster-bar-track > span, .coverage-track > span,
-  .stage-coverage-track > span, .diagnostic-track > span, .day-bars span,
+  .stage-track > span, .diagnostic-track > span, .day-bars span,
   .stepper li.done > span,
   .primary-reset-confirmation, .scenario-reset-confirmation {
     animation: none !important;
@@ -1761,6 +1774,139 @@ td { padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .entity-context-grid .is-editing dd s { color: var(--muted); text-decoration-thickness: 1px; }
 .entity-context-grid .is-editing dd b { color: var(--accent); font-weight: 600; }
 
+/* Presença por módulo: exclusivo do estudo em lote. Uma premissa aplicada
+   ao ano inteiro fica "sem efeito" nos módulos onde o alvo nem existe, e
+   essa faixa antecipa quais são, antes de gastar as simulações. */
+.entity-context-modules {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+}
+.entity-context-modules-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .03em;
+}
+.entity-context-modules ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.entity-context-modules li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.entity-context-modules li strong { font-size: 12.5px; color: var(--ink); }
+.entity-context-modules li small { font-size: 11px; color: var(--muted); }
+.entity-context-modules li.is-full { border-color: var(--success); }
+.entity-context-modules li.is-full strong { color: var(--success); }
+.entity-context-modules li.has-gap { border-color: var(--warning); }
+.entity-context-modules li.has-gap strong { color: var(--warning); }
+.entity-context-modules li.is-absent { opacity: .62; border-style: dashed; }
+
+/* Resumo de varios alvos. A borda de destaque separa "estou vendo um
+   registro" de "estou vendo um conjunto", que exigem leituras diferentes. */
+.entity-context.is-summary { border-left: 3px solid var(--accent); }
+
+/* Uma faixa por alvo. A lista rola dentro do painel: com dezenas de alvos
+   ela empurraria o botao de enviar para fora da tela. */
+.selection-bands {
+  display: grid;
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+  margin: 12px 0 0;
+  padding: 0 2px 0 0;
+  list-style: none;
+}
+
+.selection-band {
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.selection-band.is-rest {
+  color: var(--muted);
+  border-style: dashed;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.selection-band-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.selection-band-head strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.selection-band-head .pill-state { font-size: 10.5px; padding: 2px 8px; }
+
+.selection-band-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 7px 14px;
+  margin: 0;
+}
+.selection-band-fields > div { min-width: 0; }
+.selection-band-fields dt {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .03em;
+}
+/* Duas linhas por campo. Um perfil com dez habilitacoes estica a faixa ate
+   esconder as vizinhas, e o que se perde e justamente a comparacao entre
+   registros. O valor completo fica no title. */
+.selection-band-fields dd {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 1px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.selection-band-fields .is-editing {
+  margin: -4px -6px;
+  padding: 4px 6px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--accent-wash);
+}
+.selection-band-fields .is-editing dt { color: var(--accent); }
+.selection-band-fields .is-editing dd s { color: var(--muted); text-decoration-thickness: 1px; }
+.selection-band-fields .is-editing dd b { color: var(--accent); font-weight: 600; }
+
+.entity-context-aviso {
+  margin: 12px 0 0;
+  padding: 9px 11px;
+  border-left: 3px solid var(--warning);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--warning-soft);
+  color: var(--ink);
+  font-size: 12px;
+}
+
 @media (max-width: 640px) {
   .entity-context { padding: 12px 13px; }
   .entity-context-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 9px 14px; }
@@ -1867,3 +2013,742 @@ td { padding: 12px 14px; border-bottom: 1px solid var(--line); }
   line-height: 1.45;
 }
 .inert-change b { color: var(--warning); font-weight: 600; }
+
+/* ============================================================
+   Seleção em lote e processamento em lote (2.0)
+   Tudo abaixo usa apenas os tokens já definidos, de modo que os
+   dois temas continuam resolvendo sem regra extra.
+   ============================================================ */
+
+/* --- Chave de modo do processamento: rodada unica x lote --- */
+.process-mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.process-mode-switch { margin: 0 0 22px; }
+.process-mode-switch button {
+  padding: 8px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.process-mode-switch button:hover { border-color: var(--accent); color: var(--accent); }
+.process-mode-switch button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.process-mode-hint {
+  flex: 1 1 260px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* --- Seletor múltiplo de entidades --- */
+.entity-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+}
+.entity-picker-filters {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* Sem isto, a faceta mais alta estica todas as outras: uma lista longa de
+     gestores deixava CH letiva e status como caixas quase vazias de 590px. */
+  align-items: start;
+}
+.entity-picker-search { grid-column: 1 / -1; }
+.entity-picker-facet {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.entity-picker-facet legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.entity-picker-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.entity-picker-count { margin-left: auto; color: var(--muted); font-size: 12.5px; }
+.entity-picker-count strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.entity-picker-entry { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.entity-picker-entry strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+.entity-picker-entry small { color: var(--muted); font-size: 11.5px; }
+.entity-picker-empty { padding: 18px; color: var(--muted); font-size: 13px; text-align: center; }
+
+/* --- Formulário de aplicação em lote --- */
+/* Em coluna, o align-items:end herdado de .scenario-change-form (pensado
+   para o grid) empurrava cada campo para a direita e encolhia o seletor. */
+.scenario-batch-form { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
+.scenario-ch-mode {
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.scenario-ch-mode legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.scenario-ch-mode label { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--ink-soft); }
+.field-hint { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+
+.batch-feedback {
+  padding: 12px 14px;
+  border: 1px solid var(--success);
+  border-left-width: 3px;
+  border-radius: var(--r-sm);
+  background: var(--success-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+.batch-feedback.with-skips { border-color: var(--warning); background: var(--warning-soft); }
+.batch-feedback ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-soft); }
+.batch-feedback li { margin: 3px 0; }
+
+/* --- Processamento em lote --- */
+.alert.warning { color: var(--ink); background: var(--warning-soft); border-color: var(--warning); }
+.button.ghost { background: transparent; border-color: var(--line-strong); color: var(--ink-soft); }
+.button.ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+td.numeric, th.numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.batch-inspection { margin-top: 20px; }
+.batch-inspection h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.batch-file-error { color: var(--critical); font-size: 12.5px; }
+.batch-module-tag {
+  display: inline-block;
+  margin: 2px 6px 2px 0;
+  padding: 3px 9px;
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--r-pill);
+  background: var(--accent-wash);
+  color: var(--accent-deep);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.batch-module-tag.unsupported { border-color: var(--warning); background: var(--warning-soft); color: var(--warning); }
+
+.batch-module-choice {
+  margin: 18px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+}
+.batch-module-choice legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.batch-module-options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.batch-module-options label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+.batch-module-options label.selected { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-deep); font-weight: 600; }
+
+.batch-serial-note { margin: 0 0 18px; font-size: 12.5px; }
+
+/* Um cartão por módulo no acompanhamento: as mesmas etapas, mensagem e
+   artefatos da rodada única, repetidos por módulo. */
+.batch-module-list { display: flex; flex-direction: column; gap: 18px; }
+.batch-module-card {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.batch-module-card > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.batch-module-card > header > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.batch-module-number {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.batch-module-card > header strong { color: var(--ink); font-size: 15px; font-weight: 600; }
+.batch-module-card > header small { color: var(--muted); font-size: 12px; }
+.batch-module-card .stepper { margin-bottom: 14px; }
+.batch-module-card .kpi-grid { margin-top: 16px; }
+.batch-module-card .downloads { margin-top: 16px; }
+.batch-module-waiting {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* Situação da validação por módulo, com uma segunda pista além da cor. */
+.batch-ready { color: var(--success); font-size: 12.5px; font-weight: 600; }
+.batch-ready::before { content: "✓ "; }
+.batch-blocked { color: var(--warning); font-size: 12.5px; }
+.batch-blocked::before { content: "! "; font-weight: 700; }
+
+/* Ocorrências de um módulo, abertas sob demanda dentro da própria tabela. */
+.batch-issue-row > td { padding: 0 16px 16px; background: var(--surface-sunken); }
+.batch-issue-table { width: 100%; margin-bottom: 12px; }
+.batch-issue-table th {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.batch-issue-table td { font-size: 12.5px; }
+
+/* Falha de render contida: a barreira ocupa o lugar do painel que quebrou,
+   sem levar a navegação junto. */
+.error-boundary { border-color: var(--critical); border-left: 3px solid var(--critical); }
+.error-boundary p { margin: 0 0 12px; color: var(--ink-soft); font-size: 13px; }
+.error-boundary pre {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Seletor de rodada (RoundPicker)
+
+   Um lote gera uma rodada por modulo e todas compartilham criterio, perfil,
+   data e arquivo. O rotulo da opcao guarda so o que as distingue; o contexto
+   completo da rodada escolhida vai na legenda, que quebra em varias linhas em
+   vez de ser cortada pela largura do campo.
+--------------------------------------------------------------------------- */
+.round-picker { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.page-heading-actions .round-picker { width: min(520px, 52vw); }
+.page-heading-actions .round-picker .compact-field { width: 100%; }
+.round-picker select { text-overflow: ellipsis; }
+.round-picker optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
+.round-picker option { font-weight: 400; color: var(--ink); }
+
+.round-picker-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.round-picker-context > span[aria-hidden="true"] { color: var(--faint); }
+.round-picker-tag {
+  padding: 2px 7px;
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--r-pill);
+  background: var(--accent-wash);
+  color: var(--accent-deep);
+  font: 600 10.5px/1.5 var(--font-mono);
+  letter-spacing: .06em;
+}
+/* O nome do arquivo e a parte mais longa e a menos util para decidir: corta
+   com reticencias e mantem o valor inteiro no title. */
+.round-picker-file {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Tabelas do modo lote
+--------------------------------------------------------------------------- */
+/* "MÓDULO" quebrava como "MÓDUL/O" no cabecalho estreito. */
+.batch-table th { white-space: nowrap; }
+/* Nomes de base quebravam no meio do token: BASE_..._M5 / 1.xlsx */
+.batch-table td.batch-file { word-break: normal; overflow-wrap: anywhere; line-height: 1.4; }
+.batch-table td.batch-file code { font-size: 12px; }
+.batch-table .batch-row-action { white-space: nowrap; }
+
+/* Na aba Cenarios o seletor divide a linha com o botao de zerar. A legenda
+   precisa ocupar a largura inteira embaixo dos dois, em vez de disputar
+   espaco lateral com o botao: `display: contents` promove os filhos do
+   RoundPicker a itens do proprio grid. */
+.scenario-select-action .round-picker { display: contents; }
+.scenario-select-action .round-picker > .compact-field { grid-column: 1; grid-row: 1; }
+.scenario-select-action > .scenario-reset-trigger { grid-column: 2; grid-row: 1; }
+.scenario-select-action .round-picker-context { grid-column: 1 / -1; grid-row: 2; }
+
+/* Com o seletor mais alto, alinhar pelo rodape deixava um vao morto acima do
+   titulo do painel. */
+.scenario-intro { align-items: start; }
+
+/* Mesmo encaixe do painel de cenarios para o cabecalho das abas de analise:
+   o campo e o botao dividem a primeira linha e a legenda ocupa a largura
+   inteira embaixo, em vez de empurrar o botao para baixo. */
+.page-heading-actions:has(.round-picker) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  row-gap: 6px;
+}
+.page-heading-actions:has(.round-picker) .round-picker { display: contents; }
+.page-heading-actions:has(.round-picker) .round-picker > .compact-field { grid-column: 1; grid-row: 1; }
+.page-heading-actions:has(.round-picker) > .primary-reset-control { grid-column: 2; grid-row: 1; align-self: end; }
+.page-heading-actions:has(.round-picker) .round-picker-context { grid-column: 1 / -1; grid-row: 2; }
+
+/* Acao destrutiva no historico de lotes: confirmacao inline, sem dialogo
+   modal, para nao bloquear a leitura da tabela. */
+.batch-row-action { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.text-action.danger { color: var(--critical); }
+.text-action.danger:hover:not(:disabled) { text-decoration: underline; }
+.text-action:disabled { opacity: .45; cursor: not-allowed; }
+.batch-remove-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.batch-remove-confirm > span { color: var(--muted); font-size: 12.5px; }
+
+/* Selecao multipla dentro dos formularios de politica: o campo ocupa a
+   largura do formulario, como os selects que substituiu. */
+.scenario-policy-form .multi-filter { width: 100%; }
+.scenario-policy-form .multi-filter details { width: 100%; }
+.multi-filter-bulk { display: flex; gap: 8px; flex-wrap: wrap; }
+.multi-filter-bulk .multi-filter-clear { flex: 1 1 auto; }
+
+/* Faceta longa em lista suspensa: sem a moldura de fieldset, porque o proprio
+   MultiSelect ja desenha rotulo e resumo. */
+.entity-picker-facet-menu { padding: 0; border: 0; background: none; }
+.entity-picker-facet-menu .multi-filter { width: 100%; }
+
+/* Campo de CH letiva no modo livre: o numero e o atalho de volta a lista
+   fechada compartilham a linha. */
+.scenario-ch-livre { display: flex; align-items: center; gap: 10px; }
+.scenario-ch-livre input { flex: 1 1 auto; min-width: 0; }
+.scenario-ch-livre .text-action { flex: 0 0 auto; white-space: nowrap; font-size: 11.5px; }
+
+/* Origem das faixas de carga: a mesma base responde por CH letiva (o que esta
+   em sala) ou por CH contratada (os tipos de contrato). */
+.scenario-ch-origem { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.scenario-ch-fonte { display: flex; flex-wrap: wrap; gap: 6px; }
+.scenario-ch-fonte button {
+  padding: 5px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.scenario-ch-fonte button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.scenario-ch-fonte button.active { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-deep); }
+.scenario-ch-fonte button:disabled { opacity: .55; cursor: not-allowed; }
+
+/* Carimbo do build dentro do selo de versao: responde num relance se a pagina
+   veio do cache do navegador em vez do pacote recem-publicado. */
+.environment-badge small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font: 500 9.5px/1.3 var(--font-mono);
+  letter-spacing: .04em;
+  text-transform: none;
+}
+
+/* Escolha de docentes/ofertas em lista suspensa: as facetas acima ja reduzem o
+   conjunto, e a busca vive dentro do proprio menu. Como aqui a lista pode ter
+   centenas de registros, o menu ganha mais altura que o das facetas. */
+.entity-picker-choice { margin-top: 12px; }
+.entity-picker-choice .multi-filter { width: 100%; }
+.entity-picker-choice .multi-filter-options { max-height: 340px; }
+.entity-picker-choice .multi-filter summary span { font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   Estudo em lote: a mesma pergunta aplicada aos módulos do ano letivo.
+
+   O modo vive dentro da aba Cenários porque a decisão é a mesma — mudar uma
+   premissa e reprocessar —, só que repetida ao longo do ano. Os blocos abaixo
+   reaproveitam os tokens e as classes do fluxo de um módulo (.panel,
+   .section-title, .field, .executive-moves, .kpi-card) e só acrescentam o que
+   é próprio do eixo por módulo.
+--------------------------------------------------------------------------- */
+
+.scenario-mode { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 24px; }
+.scenario-mode button { padding: 16px 20px; color: inherit; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.scenario-mode button:hover, .scenario-mode button.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-wash); }
+.scenario-mode button.active { background: var(--accent-wash); }
+.scenario-mode strong { display: block; color: var(--ink); font-size: 13px; }
+.scenario-mode small { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+
+.study-hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+
+.study-scope-form { display: grid; gap: 16px; }
+.study-modules { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.study-modules legend { padding: 0 6px; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; }
+.study-module-presets { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.study-module-checks { display: flex; flex-wrap: wrap; gap: 10px; }
+.study-module-checks label { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; background: var(--surface-sunken); border: 1px solid var(--line); border-radius: var(--r-pill); font-size: 12px; cursor: pointer; }
+.study-module-checks label.active { color: var(--accent); background: var(--accent-wash); border-color: var(--accent); font-weight: 600; }
+
+.study-active-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 16px 18px; background: var(--surface-sunken); border-radius: 10px; }
+.study-active-header strong { display: block; color: var(--ink); font-size: 14px; }
+.study-active-header small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.study-active-actions { display: flex; align-items: center; gap: 12px; }
+.study-module-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.study-module-chips span { padding: 4px 9px; color: var(--ink-soft); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-pill); font-size: 11.5px; font-weight: 600; }
+
+/* O formulário do valor vem depois da janela de seleção, e por isso é curto:
+   escolher o alvo é o trabalho, definir o novo valor é uma linha. */
+.study-premise-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-items: end; gap: 14px; margin: 18px 0 20px; }
+.study-ch-editor { display: grid; gap: 8px; }
+.study-ch-mode, .study-target-mode { display: inline-flex; gap: 2px; padding: 3px; background: var(--surface-sunken); border: 1px solid var(--line); border-radius: var(--r-pill); }
+.study-ch-mode button, .study-target-mode button { padding: 6px 12px; color: var(--muted); background: transparent; border: 0; border-radius: var(--r-pill); font: inherit; font-size: 12px; cursor: pointer; }
+.study-ch-mode button.active, .study-target-mode button.active { color: var(--on-accent); background: var(--accent); font-weight: 600; }
+.study-target-mode { margin-bottom: 16px; }
+
+/* A matriz premissa × módulo é o coração do modo lote: é ela que mostra, antes
+   de gastar uma simulação por módulo, onde a premissa não encosta em nada. */
+.study-premise-table, .study-module-table { width: 100%; border-collapse: collapse; }
+.study-premise-table th[scope="row"], .study-module-table th[scope="row"] { color: var(--ink); background: transparent; text-transform: none; letter-spacing: normal; font-size: 12.5px; font-weight: 600; }
+.study-cell-applied { color: var(--success); font-weight: 600; }
+.study-cell-empty { color: var(--muted); font-style: italic; cursor: help; }
+.study-flag { margin-left: 8px; padding: 2px 7px; color: var(--success); background: var(--success-soft); border-radius: var(--r-pill); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+
+.study-totals { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.study-module-result { margin-top: 14px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.study-module-result header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.study-module-result strong { display: block; color: var(--ink); font-size: 13.5px; }
+.study-module-result small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.study-module-result-actions { display: flex; align-items: center; gap: 12px; }
+.study-module-detail { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.study-difference-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.study-difference-grid > div { padding: 12px 14px; background: var(--surface-sunken); border-radius: 9px; }
+.study-difference-grid span { display: block; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; }
+.study-difference-grid strong { display: block; margin: 4px 0 8px; color: var(--ink); font-size: 20px; }
+.study-difference-grid ul { margin: 0; padding-left: 16px; color: var(--ink-soft); font-size: 11.5px; line-height: 1.6; }
+
+@media (max-width: 900px) {
+  .scenario-mode, .study-totals, .study-difference-grid { grid-template-columns: 1fr; }
+  .study-premise-form { grid-template-columns: 1fr; }
+  .study-active-header, .study-module-result header { flex-direction: column; }
+}
+
+/* Simulação que ficou para trás das premissas: o estado precisa competir em
+   destaque com o resultado que ele substitui, senão o operador lê o número
+   antigo como se fosse a resposta da pergunta atual. */
+.study-stale { display: inline-block; padding: 3px 9px; color: var(--warning); background: var(--warning-soft); border: 1px solid var(--warning); border-radius: var(--r-pill); font-size: 11px; font-weight: 600; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Painel de indicadores do Dashboard
+
+   Os nove cartões iguais respondiam a três perguntas diferentes e
+   pesavam todos o mesmo. Aqui cada pergunta ganha a sua forma:
+
+   1. Resultado da rodada — um número dominante e o resto quieto.
+      A cobertura é a única coisa em corpo grande da página.
+   2. Demanda e capacidade por etapa — tabela. Os quatro cartões
+      antigos eram duas métricas × duas etapas; comparar 1ª com 2ª
+      exigia pular de cartão em cartão. Numa linha o olho varre, e
+      demanda e CH letiva lado a lado tornam o delta legível sem
+      conta de cabeça.
+   3. As métricas de apoio não têm moldura: hierarquia se faz com
+      corpo e espaço, não dando cartão a tudo.
+   ═══════════════════════════════════════════════════════════════ */
+
+.round-result {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 2fr);
+  gap: clamp(18px, 2.6vw, 32px);
+  align-items: stretch;
+}
+
+.headline-metric {
+  --tone: var(--brand-accent);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(18px, 2.2vw, 26px);
+  color: var(--on-dark);
+  background: var(--brand-dark);
+  border-radius: var(--r-md);
+}
+.headline-metric > span { color: var(--on-dark-muted); font-size: 12.5px; font-weight: 600; }
+.headline-metric strong {
+  margin: 6px 0 0;
+  color: var(--tone);
+  font: 600 clamp(38px, 5.4vw, 56px)/1 var(--font-display);
+  letter-spacing: -.035em;
+  font-variant-numeric: tabular-nums;
+}
+.headline-metric small { margin-top: 10px; color: var(--on-dark-muted); font-size: 12.5px; line-height: 1.45; }
+.headline-metric.tone-warning { --tone: var(--warning); }
+
+.headline-track {
+  height: 6px;
+  margin-top: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, .16);
+  border-radius: var(--r-pill);
+}
+.headline-track > span {
+  display: block;
+  height: 100%;
+  background: var(--tone);
+  border-radius: inherit;
+  transform-origin: left center;
+  animation: crescer-horizontal 420ms var(--ease) both;
+}
+
+.result-support {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(16px, 2vw, 24px);
+  min-width: 0;
+}
+
+/* Sem moldura: só a régua vertical separa uma métrica da seguinte.
+   Três colunas fixas, não auto-fit, para que as réguas fiquem sempre
+   alinhadas entre si em vez de reflowar em uma segunda fileira torta. */
+.support-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px clamp(14px, 1.8vw, 24px);
+  margin: 0;
+}
+.support-metrics > div { padding-left: 16px; border-left: 2px solid var(--line); }
+.support-metrics > div.is-attention { border-left-color: var(--warning); }
+.support-metrics dt { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.support-metrics dd {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font: 600 clamp(22px, 2.4vw, 26px)/1.1 var(--font-display);
+  letter-spacing: -.025em;
+  font-variant-numeric: tabular-nums;
+}
+.support-metrics p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+/* Faixa da composição da oferta: fio horizontal em vez de régua vertical,
+   porque ela não é mais uma métrica na fileira — é outro assunto. */
+.order-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.order-strip > span { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.order-strip b { color: var(--muted); font-size: 13px; font-weight: 600; }
+.order-strip em {
+  margin-left: 6px;
+  color: var(--ink);
+  font-style: normal;
+  font: 600 20px/1 var(--font-display);
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.order-strip > small { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+/* ── Tabela de etapas ───────────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+/* A regra global de th veste cabeçalho de tabela de dados: caixa alta,
+   entreletra e fundo. Aqui o cabeçalho é texto corrido e precisa desligar
+   os três — "CH LETIVA ATIVA" em versalete pesa mais que o número embaixo. */
+.data-table thead th {
+  padding: 0 12px 9px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+  vertical-align: bottom;
+  border-bottom: 1px solid var(--line);
+}
+.data-table thead th:first-child { text-align: left; }
+/* A definição da métrica mora no cabeçalho, uma vez, no lugar de repetir
+   "demanda − CH letiva ativa" embaixo de cada número. */
+.data-table thead th small { display: block; margin-top: 2px; color: var(--faint); font-size: 11px; font-weight: 400; white-space: normal; }
+
+.data-table tbody th {
+  padding: 14px 12px;
+  color: var(--ink);
+  background: transparent;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.data-table tbody th small { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; font-weight: 400; text-transform: none; letter-spacing: normal; }
+.data-table tbody td {
+  padding: 14px 12px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+.data-table tbody tr + tr th, .data-table tbody tr + tr td { border-top: 1px solid var(--grid); }
+.data-table td small { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; font-weight: 400; }
+.stage-table .is-deficit, .stage-table .is-deficit strong { color: var(--critical); }
+.stage-table .is-surplus, .stage-table .is-surplus strong { color: var(--info); }
+.data-table td strong { font-weight: 600; }
+
+.stage-track {
+  height: 5px;
+  width: 84px;
+  margin: 6px 0 0 auto;
+  overflow: hidden;
+  background: var(--grid);
+  border-radius: var(--r-pill);
+}
+.stage-track > span {
+  display: block;
+  height: 100%;
+  background: var(--series-1);
+  border-radius: inherit;
+  transform-origin: left center;
+  animation: crescer-horizontal 420ms var(--ease) both;
+}
+
+@media (max-width: 900px) {
+  .round-result { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  /* A tabela rola no eixo dela; a página nunca rola de lado. */
+  .stage-panel .table-wrap { overflow-x: auto; }
+  .stage-table { min-width: 560px; }
+  .support-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .support-metrics > div { padding-left: 12px; }
+  .order-strip > small { margin-left: 0; flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .headline-track > span, .stage-track > span { animation: none; transform: none; }
+}
+
+/* ── Frentes sem ação pendente ──────────────────────────────────
+   Uma linha por frente, sem cor de fundo e sem moldura: a boa
+   notícia precisa estar registrada, não disputar atenção com a
+   frente crítica que está logo acima.
+   ─────────────────────────────────────────────────────────────── */
+.resolved-strip { margin-bottom: 24px; padding: 16px 18px; background: var(--surface-sunken); border: 1px solid var(--line); border-radius: var(--r-md); }
+.resolved-strip h2 { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; font-weight: 600; letter-spacing: normal; }
+.resolved-strip ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 26px; margin: 0; padding: 0; list-style: none; }
+.resolved-strip li { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: baseline; }
+/* O tique é a única marca de estado: dispensa pintar a linha inteira. */
+.resolved-strip li::before { content: "✓"; grid-row: 1 / span 2; align-self: start; color: var(--success); font-size: 13px; }
+.resolved-strip strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+.resolved-strip span { grid-column: 2; color: var(--success); font-size: 12.5px; font-weight: 600; }
+.resolved-strip p { grid-column: 2; margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Docentes por cargo
+
+   Mesma leitura da aba DOCENTES POR CARGO da planilha, no painel
+   que fechava o quadro do Dashboard. A hierarquia é de peso e
+   recuo, não de moldura: a linha do cargo ancora, os regimes
+   recuam sob ela e o total geral fecha com um fio mais forte.
+   ═══════════════════════════════════════════════════════════════ */
+
+.cargo-table tbody tr.is-cargo > th { padding-top: 16px; }
+.cargo-table tbody tr.is-regime > th {
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.cargo-table tbody tr.is-regime > td { color: var(--ink-soft); font-weight: 400; }
+/* O fio marca a virada para o consolidado; o negrito faz o resto. */
+.cargo-table tbody tr.is-total > th,
+.cargo-table tbody tr.is-total > td {
+  padding-top: 14px;
+  border-top: 1.5px solid var(--line-strong);
+  font-weight: 600;
+}
+.cargo-table tbody td { font-size: 14px; }
+/* Com três colunas o nome do cargo tem folga e não precisa mais de teto. */
+.cargo-table tbody td { white-space: nowrap; }
+
+/* .table-wrap table impõe 680px, medida das tabelas largas de alocação. Estes
+   quadros são estreitos e cabem no painel: sem zerar, herdavam rolagem. */
+.cargo-panel .table-wrap table, .stage-panel .table-wrap table { min-width: 0; }
+
+.cargo-usage { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.cargo-usage b { min-width: 46px; flex: 0 0 auto; font-weight: inherit; text-align: right; }
+/* A barra cede espaço antes do número: ela ilustra, o número informa. Com
+   flex ela encolhe até sumir em painel estreito, e a tabela nunca rola. */
+.cargo-usage-track {
+  height: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 84px;
+  overflow: hidden;
+  background: var(--grid);
+  border-radius: var(--r-pill);
+}
+.cargo-usage-track > span {
+  display: block;
+  height: 100%;
+  background: var(--series-1);
+  border-radius: inherit;
+  transform-origin: left center;
+  animation: crescer-horizontal 420ms var(--ease) both;
+}
+.cargo-table .not-applicable { color: var(--muted); font-weight: 400; }
+
+@media (max-width: 640px) {
+  .cargo-panel .table-wrap { overflow-x: auto; }
+  .cargo-table { min-width: 520px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cargo-usage-track > span { animation: none; transform: none; }
+}

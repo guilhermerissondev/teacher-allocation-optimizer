@@ -97,6 +97,37 @@ def _outlier_names(values: list[tuple[str, int]]) -> set[str]:
     }
 
 
+def _br_number(value: float, decimals: int = 0) -> str:
+    """Número no formato pt-BR: vírgula decimal e ponto de milhar.
+
+    Estes textos saem prontos do servidor e vão direto para a tela. Formatar
+    com ``:.1f`` entregaria "6.8%" no meio de uma frase em português, fora do
+    padrão do report semanal e do resto da interface.
+    """
+    text = f"{value:,.{decimals}f}"
+    # str.translate troca os dois separadores num passo so; encadear
+    # replace exigiria um sentinela para nao desfazer a primeira troca.
+    return text.translate(str.maketrans({",": ".", ".": ","}))
+
+
+def _br_percent(value: float, decimals: int = 1) -> str:
+    return f"{_br_number(value, decimals)}%"
+
+
+def _br_hours(value: float, decimals: int = 0) -> str:
+    return f"{_br_number(value, decimals)}h"
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    """Concordância resolvida onde o número é conhecido.
+
+    "16 disciplina(s) estão com cobertura zero" empurra para o leitor um
+    trabalho que o servidor já pode fazer: na hora de montar o texto o valor
+    está à mão.
+    """
+    return f"{_br_number(count)} {singular if abs(count) == 1 else plural}"
+
+
 def _risk_class(score: int) -> str:
     if score <= 29:
         return "Baixo"
@@ -133,6 +164,29 @@ def _hours_per_transmission(job: dict[str, Any]) -> int:
     return hours if hours > 0 else DEFAULT_HOURS_PER_TRANSMISSION
 
 
+def _has_weekly_cap(row: dict[str, Any]) -> bool:
+    """O docente tem CH letiva alocável, e portanto teto semanal?
+
+    Mesmo teste que a abertura por cargo usa para decidir entre percentual e
+    NSA. Rodadas antigas sem a coluna caem na CH_LETIVA da base.
+    """
+    if row.get("CH_LETIVA_ALOCÁVEL") is not None:
+        return _number(row.get("CH_LETIVA_ALOCÁVEL")) > 0
+    return _number(row.get("CH_LETIVA")) > 0
+
+
+def _single_candidate(row: dict[str, Any]) -> bool:
+    """A oferta tinha um único docente elegível?
+
+    Rodadas anteriores à coluna CANDIDATOS_ELEGÍVEIS não a trazem, e ali
+    `_number(None)` daria 0 — que passa no teste `<= 1` e marcaria *todas* as
+    alocações como escassas, com um cartão crítico dizendo 100%. Sem o dado, a
+    resposta é não sei, e o indicador fica de fora.
+    """
+    value = row.get("CANDIDATOS_ELEGÍVEIS")
+    return value is not None and _number(value) <= 1
+
+
 def _coverage_rows(
     rows: list[dict[str, Any]],
     dimensions: tuple[str, ...],
@@ -158,7 +212,7 @@ def _coverage_rows(
                 "coverage_pct": round(100 * allocated / total, 2) if total else 0,
                 "demand_hours": total * hours_per_transmission,
                 "single_candidate": sum(
-                    _number(item.get("CANDIDATOS_ELEGÍVEIS")) <= 1
+                    _single_candidate(item)
                     for item in items
                     if _text(item.get("STATUS"), "").upper() == "ALOCADA"
                 ),
@@ -179,6 +233,12 @@ def _coverage_rows(
 
 
 def build_insights(job: dict[str, Any]) -> dict[str, Any]:
+    # A guarda vem antes de tudo. `_hours_per_transmission` engole o
+    # FileNotFoundError de `load_summary`, e sem isto `_allocation_workbook`
+    # chamaria Path(None) numa rodada em fila — TypeError, que a rota não
+    # trata, virando 500 com traceback onde o Dashboard devolve 409.
+    if not job.get("round_dir"):
+        raise FileNotFoundError("A rodada ainda não foi criada.")
     hours_per_transmission = _hours_per_transmission(job)
     workbook_path = _allocation_workbook(job)
     allocations = _records(workbook_path, "ALOCACOES")
@@ -229,9 +289,14 @@ def build_insights(job: dict[str, Any]) -> dict[str, Any]:
         )
 
     active_teachers = [row for row in teachers if _text(row.get("STATUS"), "").upper() == "ATIVO"]
+    # A mediana de utilização só considera quem tem teto semanal. O contrato
+    # Stricto sai da planilha com 0% por convenção — não porque esteja ocioso,
+    # mas porque usa limite de disciplinas. Misturar esse zero com percentuais
+    # reais puxava a mediana para perto de zero numa casa com muito Stricto.
     peak_utilizations = [
         max(_percent(row.get("UTILIZAÇÃO_1ª_ETAPA")), _percent(row.get("UTILIZAÇÃO_2ª_ETAPA")))
         for row in active_teachers
+        if _has_weekly_cap(row)
     ]
     p90_count = 0
     if ranked_counts:
@@ -277,7 +342,7 @@ def build_insights(job: dict[str, Any]) -> dict[str, Any]:
         )
     risk_teachers.sort(key=lambda item: (-item["score"], -item["allocations"], item["teacher"]))
 
-    scarce_allocations = sum(1 for row in allocated if _number(row.get("CANDIDATOS_ELEGÍVEIS")) <= 1)
+    scarce_allocations = sum(1 for row in allocated if _single_candidate(row))
     critical_or_high = sum(1 for row in risk_teachers if row["risk_class"] in {"Alto", "Crítico"})
     stage_1_count = sum(1 for row in allocated if _text(row.get("ORDEM"), "").upper() in {"1ª", "ESTENDIDA"})
     stage_2_count = sum(1 for row in allocated if _text(row.get("ORDEM"), "").upper() in {"2ª", "ESTENDIDA"})
@@ -319,46 +384,140 @@ def build_insights(job: dict[str, Any]) -> dict[str, Any]:
     top_gap_profile = Counter(
         _text(row.get("PERFIL_DISCIPLINA")) for row in unassigned
     ).most_common(1)
-    opportunities = [
-        {
-            "priority": "Alta" if unassigned else "Monitorar",
-            "kind": "coverage",
-            "title": "Recuperar ofertas não alocadas",
-            "metric": f"{len(unassigned) * hours_per_transmission}h de demanda",
-            "impact": f"{len(unassigned)} ofertas em {affected_courses} cursos ainda estão sem cobertura.",
+    # ------------------------------------------------------------------
+    # Oportunidades
+    #
+    # A severidade e o texto saem dos numeros da rodada, nao do tema do cartao.
+    # Sem isso a tela pedia para "atacar os perfis com maior recorrencia de
+    # falha" mesmo com cobertura em 100% e zero lacuna a atacar.
+    # ------------------------------------------------------------------
+    PRIORITY_LABELS = {
+        "critica": "Crítica",
+        "alta": "Alta",
+        "media": "Média",
+        "monitorar": "Monitorar",
+        "resolvido": "Sem ação",
+    }
+    unassigned_count = len(unassigned)
+    unassigned_hours = unassigned_count * hours_per_transmission
+    allocated_count = len(allocated)
+    active_teacher_count = sum(
+        _text(row.get("STATUS"), "").upper() == "ATIVO" for row in teachers
+    )
+    idle_count = len(idle_active_teachers)
+    rpa_hours = len(rpa_rows) * hours_per_transmission
+
+    # 1. Cobertura ------------------------------------------------------
+    if not unassigned_count:
+        coverage_item = {
+            "severity": "resolvido",
+            "metric": "Nenhuma lacuna",
+            "impact": "Todas as ofertas do recorte receberam docente.",
+            "action": "Nada a recuperar nesta rodada. Reveja apenas se a base mudar.",
+        }
+    else:
+        coverage_item = {
+            "severity": "critica" if disciplines_uncovered else "alta",
+            "metric": f"{_br_hours(unassigned_hours)} de demanda",
+            "impact": (
+                f"{_plural(disciplines_uncovered, 'disciplina está', 'disciplinas estão')} "
+                f"com cobertura zero; ao todo "
+                f"{_plural(unassigned_count, 'oferta', 'ofertas')} em "
+                f"{_plural(affected_courses, 'curso', 'cursos')} sem docente."
+                if disciplines_uncovered
+                else f"{_plural(unassigned_count, 'oferta', 'ofertas')} em "
+                f"{_plural(affected_courses, 'curso', 'cursos')} "
+                f"{'ainda está' if unassigned_count == 1 else 'ainda estão'} sem cobertura."
+            ),
             "action": "Atacar primeiro os perfis e horários com maior recorrência de falha.",
-        },
-        {
-            "priority": "Alta" if scarce_allocations else "Monitorar",
-            "kind": "scarcity",
-            "title": "Proteger alocações de candidato único",
+        }
+
+    # 2. Escassez de alternativas ---------------------------------------
+    scarce_share = (100 * scarce_allocations / allocated_count) if allocated_count else 0
+    if not scarce_allocations:
+        scarcity_item = {
+            "severity": "resolvido",
+            "metric": "Nenhuma oferta exposta",
+            "impact": "Toda alocação tem ao menos uma alternativa docente elegível.",
+            "action": "Nenhuma proteção adicional necessária nesta rodada.",
+        }
+    else:
+        scarcity_item = {
+            "severity": "alta" if scarce_share >= 10 else "media",
             "metric": f"{scarce_allocations} ofertas sensíveis",
-            "impact": "Qualquer afastamento ou reajuste pode transformar estas alocações em lacunas.",
+            "impact": (
+                f"{_br_percent(scarce_share)} das alocações dependem de um único docente elegível; "
+                "qualquer afastamento vira lacuna."
+            ),
             "action": "Criar segunda opção de perfil ou preservar agenda e CH do docente atual.",
-        },
-        {
-            "priority": "Média",
-            "kind": "capacity",
-            "title": "Reavaliar docentes ativos sem alocação",
-            "metric": f"{len(idle_active_teachers)} docentes sem alocação",
-            "impact": "Estes docentes não receberam ofertas nesta rodada, mas podem ter restrições de compatibilidade.",
-            "action": "Verificar perfil, agenda e saldo de CH antes de buscar capacidade externa.",
-        },
-        {
-            "priority": "Alta" if rpa_rows else "Monitorar",
-            "kind": "cost",
-            "title": "Revisar exposição a RPA/NF",
-            "metric": f"{len(rpa_rows) * hours_per_transmission}h alocadas",
+        }
+
+    # 3. Capacidade ociosa ----------------------------------------------
+    # O mesmo numero significa coisas diferentes: ocioso COM lacuna aberta e
+    # contradicao acionavel; ocioso com tudo coberto e so folga de planejamento.
+    idle_share = (100 * idle_count / active_teacher_count) if active_teacher_count else 0
+    if not idle_count:
+        capacity_item = {
+            "severity": "resolvido",
+            "metric": "Nenhum docente ocioso",
+            "impact": "Todos os docentes ativos receberam ao menos uma oferta.",
+            "action": "Capacidade interna totalmente aproveitada nesta rodada.",
+        }
+    elif unassigned_count:
+        capacity_item = {
+            "severity": "alta",
+            "metric": f"{idle_count} docentes sem alocação",
+            "impact": (
+                f"Há {_br_hours(unassigned_hours)} sem cobertura e {_br_hours(internal_idle_hours)} "
+                "livres em docentes ativos: a capacidade existe, mas não encaixou."
+            ),
+            "action": "Verificar perfil, agenda e saldo de CH por etapa antes de buscar capacidade externa.",
+        }
+    else:
+        capacity_item = {
+            "severity": "monitorar",
+            "metric": f"{idle_count} docentes sem alocação",
+            "impact": (
+                f"{_br_percent(idle_share)} dos docentes ativos ficaram sem oferta, "
+                "com a cobertura já completa."
+            ),
+            "action": "Nenhuma ação de cobertura pendente; use o dado para planejar o próximo módulo.",
+        }
+
+    # 4. Custo externo ---------------------------------------------------
+    if not rpa_hours:
+        cost_item = {
+            "severity": "resolvido",
+            "metric": "Nenhuma hora externa",
+            "impact": "Nenhuma alocação usou contrato RPA/NF nesta rodada.",
+            "action": "Exposição a custo externo zerada; nada a internalizar.",
+        }
+    else:
+        # Qualquer hora externa merece atencao, mas nao e urgencia: o contrato
+        # atual nao expoe valor financeiro, entao o dado orienta o proximo
+        # modulo em vez de exigir acao imediata nesta rodada.
+        cost_item = {
+            "severity": "media",
+            "metric": f"{_br_hours(rpa_hours)} alocadas",
             "impact": "Horas externas são um proxy de custo; o valor financeiro ainda não existe no contrato atual.",
             "action": "Simular internalização apenas quando houver docente compatível e saldo na etapa correta.",
-        },
+        }
+
+    opportunities = [
+        {"kind": "coverage", "title": "Recuperar ofertas não alocadas", **coverage_item},
+        {"kind": "scarcity", "title": "Proteger alocações de candidato único", **scarcity_item},
+        {"kind": "capacity", "title": "Reavaliar docentes ativos sem alocação", **capacity_item},
+        {"kind": "cost", "title": "Revisar exposição a RPA/NF", **cost_item},
     ]
+    for item in opportunities:
+        item["priority"] = PRIORITY_LABELS[item["severity"]]
+
 
     automatic_insights = [
         {
             "tone": "attention" if top_twenty_share >= 50 else "neutral",
             "title": "Concentração da distribuição",
-            "text": f"Os {top_twenty_size} docentes do grupo superior (20%) concentram {top_twenty_share:.1f}% das ofertas alocadas.",
+            "text": f"Os {_br_number(top_twenty_size)} docentes do grupo superior (20%) concentram {_br_percent(top_twenty_share)} das ofertas alocadas.",
         },
         {
             "tone": "critical" if critical_or_high else "positive",
@@ -373,7 +532,7 @@ def build_insights(job: dict[str, Any]) -> dict[str, Any]:
         {
             "tone": "neutral",
             "title": "Maior concentração temática",
-            "text": f"{top_cluster['label']} reúne {top_cluster['count']} ofertas ({top_cluster['share_pct']:.1f}% das alocadas).",
+            "text": f"{top_cluster['label']} reúne {_br_number(top_cluster['count'])} ofertas ({_br_percent(top_cluster['share_pct'])} das alocadas).",
         },
     ]
 

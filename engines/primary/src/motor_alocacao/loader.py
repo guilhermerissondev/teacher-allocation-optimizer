@@ -8,6 +8,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from .criteria import CRITERION_PROFILE, normalize_criterion
+from .normalization import normalize, normalize_key, profile_tokens
 from .domain import (
     CONTRACT_UNKNOWN,
     Problem,
@@ -21,17 +22,7 @@ MAPA_SHEET = "MAPA PEDAGÓGICO"
 DOCENTES_SHEET = "DOCENTES"
 
 
-def normalize(value: Any) -> str:
-    return " ".join(str(value or "").strip().casefold().split())
 
-
-def normalize_key(value: Any) -> str:
-    text = unicodedata.normalize("NFKD", normalize(value))
-    return "".join(char for char in text if not unicodedata.combining(char))
-
-
-def profile_tokens(value: Any) -> frozenset[str]:
-    return frozenset(normalize(item) for item in str(value or "").split(",") if item.strip())
 
 
 def as_time(value: Any) -> time | None:
@@ -67,6 +58,11 @@ def _value(row: tuple[Any, ...], indexes: dict[str, int], column: str) -> Any:
     if column not in indexes:
         raise ValueError(f"Coluna obrigatória ausente: {column}")
     return row[indexes[column]]
+
+
+def _optional_value(row: tuple[Any, ...], indexes: dict[str, int], column: str) -> Any:
+    """Coluna que a base pode não trazer, sem invalidar o arquivo."""
+    return row[indexes[column]] if column in indexes else None
 
 
 def _nonnegative_integer(value: Any, column: str, excel_row: int) -> int:
@@ -109,6 +105,9 @@ def load_problem(
             _value(row, docente_indexes, "CH_CONTRATADA"), "CH_CONTRATADA", excel_row
         )
         profile_text = str(_value(row, docente_indexes, "PERFIL_DISCIPLINA") or "").strip()
+        # CLUSTER e opcional: bases anteriores ao contrato 2.4 nao trazem a
+        # coluna, e continuam valendo com a regra antiga.
+        cluster_text = str(_optional_value(row, docente_indexes, "CLUSTER") or "").strip()
         teacher = Teacher(
                 id=len(teachers),
                 name=str(_value(row, docente_indexes, "NOME") or "").strip(),
@@ -120,6 +119,8 @@ def load_problem(
                 status=str(_value(row, docente_indexes, "STATUS") or "").strip(),
                 profiles=profile_tokens(profile_text),
                 profile_text=profile_text,
+                clusters=profile_tokens(cluster_text),
+                cluster_text=cluster_text,
             )
         if teacher.contract_family == CONTRACT_UNKNOWN:
             raise ValueError(

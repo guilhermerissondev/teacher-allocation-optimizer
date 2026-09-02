@@ -17,6 +17,8 @@ class Settings:
     orphan_upload_retention_seconds: int = 7 * 24 * 60 * 60
     max_primary_inflight_jobs: int = 2
     max_scenario_inflight_jobs: int = 2
+    # Um lote cobre no máximo o ano letivo inteiro: módulos 51 a 54.
+    max_batch_modules: int = 4
     shutdown_grace_seconds: float = 5.0
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "::1")
     allowed_origins: tuple[str, ...] = ()
@@ -27,6 +29,7 @@ class Settings:
             "max_upload_storage_bytes": self.max_upload_storage_bytes,
             "max_primary_inflight_jobs": self.max_primary_inflight_jobs,
             "max_scenario_inflight_jobs": self.max_scenario_inflight_jobs,
+            "max_batch_modules": self.max_batch_modules,
         }
         invalid = [name for name, value in positive.items() if value <= 0]
         if invalid:
@@ -44,7 +47,7 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        # `config.py` lives in backend/app. Keeping the application
+        # `config.py` lives in vbeta1.0/backend/app. Keeping the application
         # root relative to this file makes the package portable.
         repo_root = Path(__file__).resolve().parents[2]
         tela_dir = repo_root
@@ -107,6 +110,11 @@ class Settings:
         return self.data_dir / "jobs"
 
     @property
+    def batch_dir(self) -> Path:
+        """Área de trabalho dos lotes: origens enviadas e recortes por módulo."""
+        return self.data_dir / "lotes"
+
+    @property
     def scenario_engine_dir(self) -> Path:
         return self.repo_root / "engines" / "scenarios"
 
@@ -139,5 +147,6 @@ class Settings:
             self.scenario_dir,
             self.scenario_job_dir,
             self.scenario_result_dir,
+            self.batch_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)

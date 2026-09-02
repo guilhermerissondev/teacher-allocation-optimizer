@@ -14,9 +14,10 @@ from .domain import (
 )
 from .criteria import (
     cluster_profile_map,
-    eligible_profiles_for,
+    declares_teacher_clusters,
     has_exact_profile,
     normalize_criterion,
+    teacher_meets_offer,
     uses_cluster,
 )
 from .eligibility import build_eligibility
@@ -83,6 +84,7 @@ def audit_allocation(
     )
     cluster_mode = uses_cluster(criterion)
     cluster_profiles = cluster_profile_map(problem.transmissions)
+    cluster_reference = declares_teacher_clusters(problem.teachers)
     policies = scenario_policies(scenario_policy)
     eligibility, scenario_override_pairs, _ = cluster_policy_eligibility(
         problem,
@@ -168,11 +170,10 @@ def audit_allocation(
             inactive_errors.append(transmission.excel_row)
         if teacher.id not in eligible:
             ineligible_errors.append(transmission.excel_row)
-        accepted_profiles = eligible_profiles_for(
-            transmission, criterion, cluster_profiles
-        )
         if (
-            not accepted_profiles.intersection(teacher.profiles)
+            not teacher_meets_offer(
+                transmission, teacher, criterion, cluster_profiles, cluster_reference
+            )
             and (transmission.id, teacher.id) not in scenario_override_pairs
         ):
             profile_errors.append(transmission.excel_row)

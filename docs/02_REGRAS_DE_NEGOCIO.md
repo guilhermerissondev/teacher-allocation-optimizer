@@ -32,6 +32,74 @@ ORDEM é a fonte canônica para a etapa. METODOLOGIA pode gerar alerta de diverg
 
 Uma oferta de 1ª e outra de 2ª podem reutilizar a mesma capacidade e o mesmo horário porque não ocorrem na mesma etapa. ESTENDIDA ocupa as duas.
 
+## Cluster como referência da candidatura
+
+A aba DOCENTES aceita uma coluna **CLUSTER**, com os grupos em que o docente
+atua, separados por vírgula. Ela é opcional: bases anteriores ao contrato 2.4
+não a trazem e continuam valendo.
+
+Quando a base declara o cluster do docente, ele passa a ser a referência dos
+métodos por cluster: a candidatura compara o cluster do docente com o da
+oferta, diretamente. Sem essa coluna, o motor mantém a regra anterior — expande
+os perfis aceitos pela oferta para a **união dos perfis de todas as ofertas do
+cluster** e compara pelo perfil.
+
+A diferença importa quando a taxonomia de perfil está incompleta: pela união de
+perfis, um perfil que aparece em dois clusters costura os dois num grupo só, e a
+candidatura atravessa fronteiras que a coordenação não reconhece. Pelo cluster
+declarado isso não acontece.
+
+Três regras seguem valendo nos dois modos:
+
+- oferta **sem** CLUSTER não forma grupo e continua restrita ao próprio perfil;
+- `PERFIL_EXATO` ignora o cluster por completo, dos dois lados;
+- `CLUSTER_PREFERENCIAL` difere de `CLUSTER_PURO` apenas no desempate, que
+  favorece a aderência exata de perfil entre soluções já ótimas — a candidatura
+  é a mesma.
+
+A coluna `BASE_ELEGIBILIDADE` da aba ALOCACOES distingue os caminhos:
+`PERFIL_EXATO`, `CLUSTER_DECLARADO` (pelo cluster do docente) e `CLUSTER`
+(pela união de perfis do cluster).
+
+## Carga do docente na planilha de resultado
+
+A `CH_LETIVA` é um teto **semanal**, então a comparação acontece dentro de cada
+metade de cinco semanas, nunca contra a soma do módulo. A aba DOCENTES declara
+isso por etapa, em vez de colapsar as duas numa única coluna:
+
+| Bloco | Colunas |
+| --- | --- |
+| Capacidade | CH_CONTRATADA, CH_LETIVA, CH_LETIVA_ALOCÁVEL |
+| Composição por ordem | QTD_1ª_ORDEM, QTD_2ª_ORDEM, QTD_ESTENDIDA, QTD_TRANSMISSÕES |
+| 1ª etapa (semanas 1–5) | QTD_DISCIPLINAS_1ª_ETAPA, CH_ALOCADA_1ª_ETAPA, CH_DISPONÍVEL_1ª_ETAPA, UTILIZAÇÃO_1ª_ETAPA |
+| 2ª etapa (semanas 6–10) | QTD_DISCIPLINAS_2ª_ETAPA, CH_ALOCADA_2ª_ETAPA, CH_DISPONÍVEL_2ª_ETAPA, UTILIZAÇÃO_2ª_ETAPA |
+| Consolidado | CH_ALOCADA_PICO, CH_DISPONÍVEL, UTILIZAÇÃO_PICO, EXCEDE_CH_LETIVA |
+
+`QTD_DISCIPLINAS_1ª_ETAPA` soma as de 1ª ordem com as ESTENDIDA; a de 2ª etapa
+soma as de 2ª ordem com as ESTENDIDA. Em `QTD_TRANSMISSÕES` a ESTENDIDA conta
+uma vez só, porque é uma disciplina, ainda que ocupe as duas metades.
+
+### CH letiva alocável
+
+`CH_LETIVA` guarda o valor da base. `CH_LETIVA_ALOCÁVEL` é o teto que a
+alocação alcança de fato: como cada transmissão consome um bloco fixo de horas
+semanais, a sobra que não fecha um bloco não tem como ser ocupada. Um regente
+de 12h contratadas com 9h letivas recebe no máximo quatro disciplinas de 2h —
+8h — e a nona hora fica ociosa por construção.
+
+**Folgas e percentuais usam a alocável**, não a `CH_LETIVA`. Manter a fração no
+divisor fazia todo o corpo docente parecer menos ocupado do que o modelo
+permite. O solver não muda com isso: a restrição de inteiros já produzia o mesmo
+piso, e o conjunto de soluções viáveis é idêntico — o que muda é o denominador
+dos relatórios.
+
+`CH_ALOCADA_PICO` é a maior das duas etapas: é ela que se compara com a
+`CH_LETIVA_ALOCÁVEL`, e `CH_DISPONÍVEL` é a folga garantida nas dez semanas.
+`EXCEDE_CH_LETIVA` marca `SIM` quando alguma etapa ultrapassa o teto, `NSA`
+para docentes Stricto — que preservam `CH_LETIVA` zero e usam um limite próprio
+de disciplinas por módulo — e `NAO` no restante. O indicador correspondente na
+aba RESUMO é **Docentes acima da CH_LETIVA em alguma etapa**.
+
 ## Critério de elegibilidade
 
 A partir da versão 2.0, o critério é escolhido explicitamente na tela de
@@ -154,13 +222,19 @@ O limite é por módulo, não por etapa. Duas disciplinas na primeira e duas na 
 
 ## Capacidade exibida no Dashboard
 
-O Dashboard possui uma regra exclusivamente analítica:
+O Dashboard aplica a mesma regra de CH letiva alocável descrita acima, com uma
+diferença de escopo:
 
 - usa a CH_LETIVA registrada para todos os docentes ativos, inclusive presencial;
 - considera apenas horas que formam transmissões completas;
 - arredonda para baixo ao múltiplo de 2.
 
-Exemplo: CH_LETIVA de 9 horas contribui com 8 horas de capacidade utilizável no Dashboard.
+Exemplo: CH_LETIVA de 9 horas contribui com 8 horas de capacidade utilizável.
+
+Até a revisão de setembro/2026 esse arredondamento existia só no Dashboard, e a
+aba DOCENTES dividia pela `CH_LETIVA` cheia. As duas superfícies reportavam
+capacidades diferentes para o mesmo corpo docente. Hoje a soma de
+`CH_LETIVA_ALOCÁVEL` da planilha e a capacidade ativa do Dashboard coincidem.
 
 Essa capacidade é bruta. Ela não é reduzida por perfil, agenda ou cluster. Por isso, o delta de capacidade é um sinal gerencial e não uma prova de que todas as horas podem cobrir qualquer disciplina.
 
@@ -302,3 +376,77 @@ Os controles permitem excluir somente o último item ou todos.
 
 A ação é destrutiva e exige confirmação na interface.
 
+## Regras do estudo em lote
+
+Um estudo aplica a mesma premissa a vários módulos do ano letivo. Ele é
+orquestração, e não uma segunda regra de negócio: cada módulo vira um cenário
+independente, resolvido, auditado e comparado pelo mesmo caminho de sempre.
+
+### Os módulos são independentes
+
+Cada módulo é resolvido separadamente, e a CH letiva do docente é reposta
+integralmente em cada um. Demitir alguém "a partir do módulo 51" significa
+aplicar a mesma premissa aos módulos 51 a 54 e ler o efeito em cada um; não há
+consumo acumulado de capacidade de um módulo para o seguinte.
+
+### O alvo é a chave de negócio
+
+A premissa aponta para a chapa do docente, o código do curso ou o da disciplina
+— nunca para a linha da planilha. O recorte por módulo copia a aba DOCENTES
+inteira e filtra o MAPA PEDAGÓGICO, de modo que a linha de uma oferta muda de
+módulo para módulo. Amarrar a premissa ao número da linha faria a mesma pergunta
+significar coisas diferentes em cada recorte: "mover o curso ADM para quarta" só
+é a mesma pergunta no ano inteiro quando o alvo é o curso.
+
+Um alvo pode não existir em algum módulo — uma disciplina que só é ofertada no
+primeiro semestre, por exemplo. O módulo é reportado sem efeito, com o motivo, e
+fica fora da fila.
+
+### A base docente precisa ser a mesma
+
+O estudo só é criado quando todas as rodadas-base escolhidas compartilham a
+mesma aba DOCENTES, verificada por impressão digital. Bases divergentes fariam a
+mesma chapa apontar para pessoas diferentes, e a comparação entre módulos
+deixaria de responder à pergunta feita.
+
+### A projeção é reescrita por inteiro
+
+Criar ou remover uma premissa reprojeta o estudo do zero em cada módulo editável.
+É o que garante que apagar uma premissa apague exatamente o que ela havia
+produzido, sem rastrear a origem de cada célula. Módulos já homologados ou em
+simulação são preservados e reportados como tal.
+
+### Recusas são individuais e explícitas
+
+Uma premissa pode valer em um módulo e cair em outro: o valor já é o praticado,
+a CH passaria do teto contratado ou o alvo não existe ali. A recusa é registrada
+com o motivo, por módulo, e nunca aplicada em silêncio.
+
+### Homologação módulo a módulo
+
+O estudo não homologa nada por conta própria. Cada módulo é homologado pelo seu
+cenário filho, sob os mesmos guardrails: validação aprovada, solver ÓTIMO,
+auditoria aprovada, mesmo critério da baseline e perfil de prova completa.
+
+### Resultado desatualizado não é resultado
+
+Quando as premissas mudam, a simulação já calculada deixa de responder à
+pergunta que está na tela. O módulo passa a ser exibido como desatualizado e os
+seus indicadores somem até a nova execução. É a proteção contra o erro mais
+perigoso da ferramenta: ler a cobertura da simulação anterior como se fosse a
+resposta da premissa nova.
+
+Uma reprojeção que reescreve exatamente as mesmas alterações não invalida nada,
+porque a planilha materializada seria idêntica.
+
+### Escopo desta versão
+
+O estudo em lote cobre capacidade, compatibilidade e agenda. As políticas de
+cluster e de prioridade seguem disponíveis apenas no cenário de um módulo.
+Fixar decisões é por oferta individual e não tem chave que atravesse módulos com
+significado.
+
+Uma premissa de agenda alcança as ofertas que o solver trata naquele módulo, que
+são as mesmas que o cenário de um módulo oferece para edição. Linhas de apoio —
+sinérgicas e não ao vivo — não são movidas junto, exatamente como já acontece no
+fluxo de um módulo.

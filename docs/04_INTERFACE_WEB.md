@@ -42,6 +42,36 @@ chapas, códigos, versões, critérios e hashes. Os arquivos ficam em
 
 ## Processamento
 
+### Rodada única ou lote
+
+A tela de Processamento abre em **Rodada única**, que é o fluxo de sempre: uma
+planilha, um módulo, uma rodada. A chave **Lote de módulos** troca o painel
+para o envio de várias planilhas — ou de uma planilha anual.
+
+Os dois modos seguem os mesmos quatro passos, com os mesmos controles: arquivo
+de entrada, resultado da validação, acompanhamento e resultado. O que muda é
+que cada passo do lote mostra uma linha por módulo em vez de uma só.
+
+**Passo 1.** A aplicação lê a coluna `MÓD` de cada arquivo e mostra o que
+encontrou antes de qualquer decisão: quantos módulos, quantas linhas cada um e
+quais estão fora do intervalo 51–54. O operador marca os módulos a processar e
+escolhe critério e perfil de execução uma vez para o lote inteiro — as mesmas
+duas perguntas da rodada única, com as mesmas explicações.
+
+**Passo 2.** Cada módulo aparece com o seu status de validação, quantas ofertas
+alocáveis tem e quantas ocorrências foram encontradas. As ocorrências de um
+módulo abrem na própria linha, e a planilha de pendências daquele módulo fica
+disponível ali. Quando há ressalvas, a confirmação é pedida **depois** de elas
+serem exibidas, como na rodada única — nunca antes.
+
+**Passo 3.** As rodadas correm em série. Cada módulo tem o seu cartão com as
+cinco etapas do motor, a mensagem corrente e, ao concluir, os indicadores e os
+artefatos daquela rodada.
+
+**Resultado.** Um consolidado soma a cobertura dos módulos do lote. Ele é um
+apoio de leitura: cada módulo continua sendo uma rodada independente, e a
+referência oficial é a rodada de cada módulo, não o consolidado.
+
 ### Seleção de módulo
 
 A tela inicia com Selecione o Módulo. Nenhum módulo deve ser presumido visualmente. As opções são 51, 52, 53 e 54.
@@ -125,6 +155,39 @@ O histórico permite escolher uma rodada. Zerar rodadas-base oferece:
 
 Cenários dependentes também são removidos e isso deve ser informado antes da confirmação.
 
+### Seleção de alvos
+
+Cada movimento de dados — capacidade, agenda e compatibilidade — usa um só
+formulário. Não há modo individual separado do modo em lote: o alvo é sempre uma
+lista suspensa com marcação múltipla, e escolher um registro ou doze muda apenas
+o rótulo do botão. Com um único alvo, o painel de contexto da rodada-base
+continua visível e o aviso de premissa inócua aparece antes do envio.
+
+Os filtros vêm da própria rodada-base e também são listas suspensas: CH letiva,
+cargo, status e gestor para docentes; cluster, curso, dia, ordem e situação na
+base para ofertas. Dentro do mesmo filtro as escolhas somam; entre filtros
+diferentes, restringem — a mesma regra dos filtros do Dashboard.
+
+Os filtros conversam entre si: cada um oferece apenas os valores que ainda
+existem depois dos outros. Escolher CH letiva de 0h deixa em Cargo somente os
+cargos que têm alguém nessa faixa, e cada opção mostra quantos registros traz.
+Uma escolha que deixa de existir sai da seleção, para o resultado nunca ficar em
+zero sem explicação.
+
+Com os filtros aplicados, **Selecionar os N filtrados** marca de uma vez tudo
+que sobrou. O contador mostra quantos estão selecionados, quantos a lista
+exibe e quantos existem no total.
+
+Para `CH_LETIVA` há duas formas de aplicar: definir o mesmo valor para todos ou
+ajustar em horas, somando ou subtraindo a partir da carga de cada docente. O
+ajuste preserva as diferenças entre eles, que é o que se espera de um reforço
+ou de um corte de capacidade.
+
+Depois de aplicar, a tela informa quantas premissas entraram e lista, com o
+motivo, as que ficaram de fora — linha que já estava no valor pedido, carga que
+ficaria negativa ou CH acima da contratada.
+
+
 ## Dashboard
 
 O Dashboard é recalculado a partir da planilha de resultado e do manifesto da rodada escolhida.
@@ -204,7 +267,18 @@ A tela apresenta:
 - insights automáticos;
 - metodologia e limitações.
 
-Horas externas não devem ser apresentadas como custo monetário.
+Os cartões de oportunidade tiram a urgência dos números da rodada, não do assunto
+do cartão, e a cor acompanha a severidade apurada: `crítica`, `alta`, `média`,
+`monitorar` e `resolvido`. Um indicador zerado fica verde e diz que não há ação
+pendente, em vez de repetir a orientação de um problema que não existe.
+
+O mesmo número pode mudar de significado: docentes ativos sem alocação são
+`alta` quando ainda há lacuna aberta — a capacidade existe e não encaixou — e
+`monitorar` quando a cobertura já está completa.
+
+Horas externas não devem ser apresentadas como custo monetário; qualquer hora
+acima de zero entra como `média`, para pedir atenção sem competir com lacuna de
+cobertura.
 
 ## Cenários
 
@@ -245,6 +319,82 @@ A comparação deve deixar claro:
 ### Resets
 
 A aba possui controles separados para rodadas-base e cenários salvos. Cada controle oferece último, todos ou cancelar.
+
+### Estudo em lote
+
+A aba abre com um seletor de modo. **Cenário de um módulo** é o padrão e mantém
+o fluxo descrito acima. **Estudo em lote** repete a mesma pergunta ao longo dos
+módulos do ano.
+
+Passos visuais:
+
+1. escolher o lote-base e os módulos, com atalhos "a partir do 51", "a partir do
+   52" e "ano inteiro";
+2. nomear o estudo e a pergunta que ele responde;
+3. escolher o movimento e os alvos na janela de seleção;
+4. conferir a matriz de premissas × módulos;
+5. simular todos os módulos aptos;
+6. comparar o consolidado do ano e cada módulo;
+7. homologar módulo a módulo, quando elegível.
+
+#### Janela de seleção
+
+O alvo é escolhido no mesmo tipo de janela do cenário de um módulo: filtros em
+lista suspensa, contagem por valor, seleção múltipla e "selecionar os filtrados".
+Dentro de um filtro as escolhas são OU, entre filtros são E, e cada filtro
+oferece apenas o que ainda existe depois dos outros.
+
+O que muda são os filtros, porque o alvo é outro:
+
+- **Docente** — CH letiva, cargo, status e gestor, como no cenário de um módulo.
+- **Curso ou disciplina** — em que módulos o alvo existe, situação na base (com
+  lacuna ou totalmente alocado), dia praticado e, para disciplinas, o curso.
+
+O filtro "com lacuna na base" é o que responde diretamente a "qual curso vive com
+disciplina sem docente": ele reduz a lista aos alvos que a rodada oficial não
+conseguiu cobrir.
+
+Vários alvos podem ser escolhidos de uma vez, e cada um vira uma premissa.
+
+#### Reorganizar agenda
+
+O movimento aceita dois alvos: **curso inteiro** ou **disciplina específica**. Os
+valores oferecidos para dia, horário e ordem são apenas os praticados no ano, com
+a contagem de ofertas em cada um — sugerir um horário que a operação não usa não
+ajuda a decidir.
+
+#### Matriz de premissas
+
+Cada linha é uma premissa e cada coluna é um módulo. A célula informa quantas
+linhas da planilha daquele módulo a premissa alcançou, ou "sem efeito" com o
+motivo no rótulo. É a tela que revela, antes de gastar uma simulação por módulo,
+onde a premissa não encosta em nada — o docente não está naquele módulo, o valor
+já é o praticado ou a CH passaria do teto contratado.
+
+Um módulo sem alteração projetada não vai para a fila, e a tela diz quais são
+antes da execução.
+
+#### Execução e comparação
+
+As simulações rodam em série no motor secundário: um estudo de quatro módulos
+leva cerca de quatro vezes o tempo de um cenário único, e a tela avisa disso
+antes do clique.
+
+A comparação tem duas camadas: os deltas consolidados do ano — cobertura,
+ofertas alocadas, ofertas sem alocação e docentes utilizados — e uma linha por
+módulo, expansível para as ofertas recuperadas, perdidas e remanejadas.
+
+#### Resultado desatualizado
+
+Quando as premissas mudam, o módulo já simulado passa a exibir "premissas
+mudaram · resultado desatualizado" no lugar do estado, e a cobertura simulada
+some. O número antigo não pode ficar ao lado da premissa nova.
+
+#### Homologação
+
+Cada módulo é homologado separadamente, com os mesmos guardrails do cenário
+único. Um módulo reprovado não bloqueia os demais, e o motivo do bloqueio
+aparece na própria linha.
 
 ## Estados e mensagens
 

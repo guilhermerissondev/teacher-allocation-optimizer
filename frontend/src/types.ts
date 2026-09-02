@@ -1,3 +1,6 @@
+declare const __BUILD_STAMP__: string;
+export const BUILD_STAMP = __BUILD_STAMP__;
+
 export type ValidationIssue = {
   severity: string;
   code: string;
@@ -68,6 +71,8 @@ export type Job = {
   require_optimal: boolean;
   time_limit_seconds: number | null;
   kind: "PRIMARY" | "SCENARIO";
+  /** Lote a que a rodada pertence; nulo em execuções avulsas. */
+  batch_id: string | null;
   criterion: EligibilityCriterion;
   profile: ExecutionProfile;
   margin_offers: number | null;
@@ -129,6 +134,9 @@ export type ScenarioCatalog = {
     status: string;
     job_function: string;
     teaching_capacity: number;
+    /** Teto que a validação cobra. Nulo quando a coluna não existe na base. */
+    contracted_capacity: number | null;
+    manager: string;
     profile: string;
   }>;
   offers: Array<{
@@ -265,6 +273,21 @@ export type DashboardData = {
       times: string[];
     };
   };
+  teachers_by_job_function: Array<{
+    job_function: string;
+    regime: string;
+    /** "cargo" agrupa, "regime" detalha, "total" fecha a tabela. */
+    level: "cargo" | "regime" | "total";
+    headcount: number;
+    contracted_hours: number;
+    allocatable_hours: number;
+    /** Média das duas etapas, que é a base do percentual. */
+    allocated_hours: number;
+    first_stage_hours: number;
+    second_stage_hours: number;
+    /** Média das etapas. Nulo sem CH letiva alocável: o contrato Stricto. */
+    utilization_pct: number | null;
+  }>;
   guardrails: { validation: string; solver: string; audit: string };
   wall_time_seconds: number;
   metric_notes: { demand: string; capacity_delta: string };
@@ -386,6 +409,8 @@ export type InsightsData = {
   };
   opportunities: Array<{
     priority: string;
+    /** Urgencia derivada dos numeros da rodada; define a cor do cartao. */
+    severity: "critica" | "alta" | "media" | "monitorar" | "resolvido";
     kind: string;
     title: string;
     metric: string;
@@ -406,4 +431,226 @@ export type InsightsData = {
   methodology: string[];
   limitations: string[];
   source_note: string;
+};
+
+/** Resultado da inspeção prévia: o que cada planilha enviada contém. */
+export type BatchInspection = {
+  files: Array<{
+    filename: string;
+    error?: string;
+    modules?: Array<{ module: number; rows: number; supported: boolean }>;
+    rows_without_module?: number;
+  }>;
+  available_modules: number[];
+};
+
+export type BatchModule = {
+  module: number;
+  upload_id: string | null;
+  filename: string;
+  validation_status: string;
+  runnable: boolean;
+  reason: string;
+  /** Os mesmos números do passo de validação da rodada única. */
+  validation: {
+    allocating_rows: number;
+    issue_groups: number;
+    blocking_issue_groups: number;
+    by_severity: Record<string, number>;
+    issues: Array<{
+      severity: string;
+      code: string;
+      sheet: string;
+      column: string;
+      message: string;
+      rows: number[];
+      count: number;
+    }>;
+  } | null;
+  job: Job | null;
+  kpis: {
+    transmissions: number;
+    allocated: number;
+    unassigned: number;
+    used_teachers: number;
+    solver_status: string | null;
+    coverage_pct: number;
+  } | null;
+};
+
+export type ModuleBatch = {
+  id: string;
+  name: string;
+  criterion: EligibilityCriterion;
+  profile: ExecutionProfile;
+  margin_offers: number | null;
+  require_optimal: boolean;
+  time_limit_seconds: number | null;
+  created_at: string;
+  status: "AGUARDANDO" | "EXECUTANDO" | "CONCLUIDO" | "PARCIAL";
+  modules: BatchModule[];
+  totals: {
+    modules: number;
+    runnable: number;
+    queued_or_running: number;
+    concluded: number;
+    offers: number;
+    allocated: number;
+    coverage_pct: number;
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Estudo em lote: a mesma pergunta aplicada a vários módulos do ano.
+// ---------------------------------------------------------------------------
+
+/** Lote com rodada concluída, oferecido como base de um estudo. */
+export type StudyBaseline = {
+  id: string;
+  name: string;
+  criterion: EligibilityCriterion;
+  profile: ExecutionProfile;
+  created_at: string;
+  modules: Array<{ module: number; baseline_job_id: string; round_name: string | null }>;
+};
+
+/**
+ * Premissa do estudo. O alvo é a chave de negócio — a chapa do docente —, e
+ * não a linha da planilha: a linha muda quando a base anual é fatiada.
+ */
+export type StudyPremise = {
+  id: string;
+  premise_type: "CAPACIDADE" | "COMPATIBILIDADE" | "AGENDA";
+  target_type: "TEACHER_BADGE" | "COURSE" | "DISCIPLINE";
+  target_value: string;
+  target_label: string;
+  field_name: string;
+  operation: "SET" | "ADJUST";
+  value: string | number;
+  created_at: string;
+};
+
+export type StudyModuleKpis = {
+  transmissions: number;
+  allocated: number;
+  unassigned: number;
+  used_teachers: number;
+  solver_status: string | null;
+  coverage_pct: number;
+};
+
+export type StudyModule = {
+  module: number;
+  baseline_job_id: string;
+  scenario_id: string | null;
+  scenario: Scenario | null;
+  job: Job | null;
+  change_count: number;
+  /** A simulação existente ficou para trás das premissas atuais. */
+  stale: boolean;
+  baseline_kpis: StudyModuleKpis | null;
+  kpis: StudyModuleKpis | null;
+  promoted: boolean;
+};
+
+export type Study = {
+  id: string;
+  batch_id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  status: "AGUARDANDO" | "EXECUTANDO" | "CONCLUIDO" | "PARCIAL";
+  premises: StudyPremise[];
+  modules: StudyModule[];
+  totals: {
+    modules: number;
+    runnable: number;
+    queued_or_running: number;
+    concluded: number;
+    compared: number;
+    baseline_offers: number;
+    baseline_allocated: number;
+    allocated: number;
+    allocated_delta: number;
+    baseline_coverage_pct: number;
+    coverage_pct: number;
+    coverage_delta_pp: number;
+    unassigned_delta: number;
+    used_teachers_delta: number;
+  };
+};
+
+/** O que cada premissa produziu dentro de um módulo, com o motivo da recusa. */
+export type StudyModuleProjection = {
+  module: number;
+  applied_count: number;
+  results: Array<{ premise_id: string; applied: number; reason: string }>;
+  locked: boolean;
+  reason: string;
+};
+
+export type StudyPremiseResult = {
+  study: Study;
+  projection: StudyModuleProjection[];
+};
+
+/**
+ * Alvo de oferta agregado de todos os módulos do estudo.
+ *
+ * `modules` diz onde o alvo existe e quantas lacunas ele deixou na rodada-base
+ * de cada módulo — é o número que responde "qual curso vive com disciplina sem
+ * docente" sem precisar sair da tela.
+ */
+export type StudyOfferTarget = {
+  code: string;
+  name: string;
+  course_code: string;
+  course_name: string;
+  modules: Array<{ module: number; offers: number; unassigned: number }>;
+  days: string[];
+  times: string[];
+  orders: string[];
+  total_offers: number;
+  total_unassigned: number;
+};
+
+export type StudyCatalog = {
+  modules: number[];
+  teachers: Array<{
+    badge: string;
+    name: string;
+    status: string;
+    job_function: string;
+    teaching_capacity: number;
+    contracted_capacity: number | null;
+    manager: string;
+    profile: string;
+  }>;
+  courses: StudyOfferTarget[];
+  disciplines: StudyOfferTarget[];
+  /** Dias, horários e ordens efetivamente praticados no ano. */
+  practiced: {
+    days: Array<{ value: string; offers: number }>;
+    times: Array<{ value: string; offers: number }>;
+    orders: Array<{ value: string; offers: number }>;
+  };
+};
+
+export type StudyComparison = {
+  study: Study;
+  modules: Array<{
+    module: number;
+    scenario_id: string | null;
+    comparison: ScenarioComparison | null;
+    reason: string;
+  }>;
+};
+
+/** Retorno da alteração em lote: o que entrou e o que foi ignorado, com motivo. */
+export type BatchChangeResult = {
+  applied: ScenarioChange[];
+  skipped: Array<{ row_number: number; reason: string }>;
+  applied_count: number;
+  skipped_count: number;
 };

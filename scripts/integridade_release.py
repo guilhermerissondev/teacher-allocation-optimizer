@@ -29,10 +29,6 @@ RUNTIME_PREFIXES = (
     "engines/primary/entrada/",
     "engines/primary/resultados/",
     "engines/scenarios/resultados/",
-    # O build da interface é gerado localmente e não é versionado, então ele
-    # varia entre clones. Mantê-lo fora do manifesto faz a verificação depender
-    # apenas do código-fonte, que é o que o repositório distribui.
-    "frontend/dist/",
 )
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 WINDOWS_RESERVED_NAMES = {

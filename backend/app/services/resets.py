@@ -150,6 +150,45 @@ def reset_saved_scenarios(
     }
 
 
+def delete_module_batch(
+    settings: Settings,
+    database: Database,
+    batch_id: str,
+) -> dict[str, Any]:
+    """Exclui um lote do historico com a mesma protecao do reset de rodadas."""
+    deleted, pending = _execute_reset(
+        settings,
+        lambda: database.delete_batch(batch_id, dry_run=True),
+        lambda: database.delete_batch(batch_id),
+    )
+    return {
+        "batch_id": batch_id,
+        "deleted_rounds": len(deleted["primary_job_ids"]),
+        "deleted_scenarios": len(deleted["scenario_ids"]),
+        "deleted_jobs": len(deleted["job_ids"]),
+        "cleanup_pending": pending,
+    }
+
+
+def delete_scenario_study_records(
+    settings: Settings,
+    database: Database,
+    study_id: str,
+) -> dict[str, Any]:
+    """Exclui um estudo com a mesma protecao do reset de cenarios."""
+    deleted, pending = _execute_reset(
+        settings,
+        lambda: database.delete_study(study_id, dry_run=True),
+        lambda: database.delete_study(study_id),
+    )
+    return {
+        "study_id": study_id,
+        "deleted_scenarios": len(deleted["scenario_ids"]),
+        "deleted_jobs": len(deleted["job_ids"]),
+        "cleanup_pending": pending,
+    }
+
+
 def reset_primary_rounds(
     settings: Settings,
     database: Database,

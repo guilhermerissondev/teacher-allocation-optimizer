@@ -106,6 +106,7 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
         "require_optimal": bool(job["require_optimal"]),
         "time_limit_seconds": job["time_limit_seconds"],
         "kind": job.get("kind", "PRIMARY"),
+        "batch_id": job.get("batch_id"),
         "criterion": job.get("criterion", "PERFIL_EXATO"),
         "profile": job.get("profile", "PROVA_COMPLETA"),
         "margin_offers": job.get("margin_offers"),
@@ -203,37 +204,81 @@ class JobManager:
                     "A fila do motor principal atingiu o limite. "
                     "Aguarde uma execução terminar antes de reenviar."
                 )
-            job_id = uuid.uuid4().hex
-            now = utc_now()
-            self.database.create_job(
-                {
-                    "id": job_id,
-                    "upload_id": upload["id"],
-                    "status": "QUEUED",
-                    "message": "Execução adicionada à fila.",
-                    "module": upload["module"],
-                    "require_optimal": require_optimal,
-                    "time_limit_seconds": time_limit_seconds,
-                    "criterion": upload.get("criterion", "PERFIL_EXATO"),
-                    "profile": upload.get("profile", "PROVA_COMPLETA"),
-                    "margin_offers": upload.get("margin_offers"),
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            )
-            try:
-                future = self.executor.submit(self._execute, job_id)
-            except RuntimeError as exc:
-                self.database.update_job(
-                    job_id,
-                    status="INTERROMPIDA",
-                    message="O servidor foi encerrado antes de iniciar a execução.",
+            return self._enqueue(upload, require_optimal, time_limit_seconds, None)
+
+    def create_batch(
+        self,
+        uploads: list[dict[str, Any]],
+        require_optimal: bool,
+        time_limit_seconds: float | None,
+        batch_id: str,
+    ) -> list[dict[str, Any]]:
+        """Enfileira uma rodada por módulo, na ordem dos módulos.
+
+        O teto normal da fila existe para conter reenvios acidentais da tela.
+        Um lote é uma decisão deliberada e conhece o próprio tamanho, então ele
+        exige a fila vazia e enfileira os seus módulos de uma vez — o executor
+        continua com um único worker, de modo que as rodadas seguem em série.
+        """
+        with self.coordinator.exclusive():
+            if self._stopping.is_set():
+                raise JobManagerUnavailable("O servidor está sendo encerrado.")
+            if not uploads:
+                raise JobQueueFull("Nenhum módulo do lote está liberado para execução.")
+            if len(uploads) > self.settings.max_batch_modules:
+                raise JobQueueFull(
+                    f"O lote aceita no máximo {self.settings.max_batch_modules} módulos."
                 )
-                raise JobManagerUnavailable("O servidor está sendo encerrado.") from exc
-            with self._state_lock:
-                self._futures[future] = job_id
-            future.add_done_callback(self._forget_future)
-            return public_job(self.database.get_job(job_id) or {})
+            if self.database.count_inflight_jobs("PRIMARY"):
+                raise JobQueueFull(
+                    "Há execução do motor principal em andamento. "
+                    "Aguarde a fila esvaziar antes de iniciar um lote."
+                )
+            return [
+                self._enqueue(upload, require_optimal, time_limit_seconds, batch_id)
+                for upload in sorted(uploads, key=lambda item: item["module"])
+            ]
+
+    def _enqueue(
+        self,
+        upload: dict[str, Any],
+        require_optimal: bool,
+        time_limit_seconds: float | None,
+        batch_id: str | None,
+    ) -> dict[str, Any]:
+        """Registra e submete uma rodada. O chamador já validou a fila."""
+        job_id = uuid.uuid4().hex
+        now = utc_now()
+        self.database.create_job(
+            {
+                "id": job_id,
+                "upload_id": upload["id"],
+                "status": "QUEUED",
+                "message": "Execução adicionada à fila.",
+                "module": upload["module"],
+                "require_optimal": require_optimal,
+                "time_limit_seconds": time_limit_seconds,
+                "criterion": upload.get("criterion", "PERFIL_EXATO"),
+                "profile": upload.get("profile", "PROVA_COMPLETA"),
+                "margin_offers": upload.get("margin_offers"),
+                "batch_id": batch_id,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+        try:
+            future = self.executor.submit(self._execute, job_id)
+        except RuntimeError as exc:
+            self.database.update_job(
+                job_id,
+                status="INTERROMPIDA",
+                message="O servidor foi encerrado antes de iniciar a execução.",
+            )
+            raise JobManagerUnavailable("O servidor está sendo encerrado.") from exc
+        with self._state_lock:
+            self._futures[future] = job_id
+        future.add_done_callback(self._forget_future)
+        return public_job(self.database.get_job(job_id) or {})
 
     def _job_result_dir(self, job_id: str) -> Path:
         """Isola cada execução para impedir associação cruzada de rodadas."""
@@ -416,6 +461,128 @@ def _number(value: Any) -> float:
         return 0.0
 
 
+def _allocatable_hours(row: dict[str, Any], hours_per_transmission: int) -> float:
+    """CH letiva alocável do docente, com recuo para rodadas antigas.
+
+    Rodadas geradas antes da coluna CH_LETIVA_ALOCÁVEL não a trazem; nesse caso
+    o arredondamento é refeito aqui a partir da CH_LETIVA, que é exatamente o
+    que o motor grava hoje.
+    """
+    if row.get("CH_LETIVA_ALOCÁVEL") is not None:
+        return max(0.0, _number(row.get("CH_LETIVA_ALOCÁVEL")))
+    return _dashboard_teaching_capacity(row.get("CH_LETIVA"), hours_per_transmission)
+
+
+def _canonical(value: Any) -> str:
+    """Forma canônica de um rótulo vindo da planilha.
+
+    Espelha `normalize_order` e `contract_family` do motor: caixa alta e
+    espaços internos colapsados. Sem isso "Estendida" ou "PROFESSOR DE  ENSINO
+    SUPERIOR PRESENCIAL" — que o motor aceita e aloca — caem em outro balde
+    aqui, e as duas telas divergem a partir da mesma planilha.
+    """
+    return " ".join(_clean(value).upper().split())
+
+
+def _regime_label(row: dict[str, Any]) -> str:
+    """Regime de contratação do docente, no formato da aba DOCENTES POR CARGO."""
+    contracted = int(_number(row.get("CH_CONTRATADA")))
+    label = f"T{contracted} · {contracted}h contratadas"
+    stricto = _canonical(row.get("NM_FUNCAO")) == "PROFESSOR DE ENSINO SUPERIOR PRESENCIAL"
+    return f"{label} · Mensalista" if stricto else label
+
+
+def _teachers_by_job_function(
+    teachers: list[dict[str, Any]],
+    hours_per_transmission: int,
+) -> list[dict[str, Any]]:
+    """Abertura do corpo docente por cargo e regime.
+
+    É a mesma leitura da aba DOCENTES POR CARGO da planilha, recalculada aqui
+    a partir de DOCENTES para valer também em rodadas geradas antes daquela
+    aba existir. Cargos abrem em regimes por CH contratada decrescente, e a
+    lista fecha no total geral.
+
+    A utilização é a média das duas etapas, não o pico: o quadro responde
+    quanto da capacidade o módulo consumiu.
+
+    Sem CH letiva alocável não há percentual a apurar — é o caso do contrato
+    Stricto, que usa um limite próprio de disciplinas.
+    """
+    groups: dict[str, dict[tuple[int, str], dict[str, float]]] = defaultdict(dict)
+    for row in teachers:
+        # Agrupa pelo rótulo já colapsado: duas grafias do mesmo cargo não
+        # podem virar duas linhas que não batem com a planilha auditada.
+        job_function = " ".join(_clean(row.get("NM_FUNCAO")).split()) or "NÃO INFORMADO"
+        contracted = int(_number(row.get("CH_CONTRATADA")))
+        key = (-contracted, _regime_label(row))
+        bucket = groups[job_function].setdefault(
+            key,
+            {
+                "headcount": 0.0,
+                "contracted": 0.0,
+                "allocatable": 0.0,
+                "first_stage": 0.0,
+                "second_stage": 0.0,
+            },
+        )
+        bucket["headcount"] += 1
+        bucket["contracted"] += contracted
+        bucket["allocatable"] += _allocatable_hours(row, hours_per_transmission)
+        bucket["first_stage"] += max(0.0, _number(row.get("CH_ALOCADA_1ª_ETAPA")))
+        bucket["second_stage"] += max(0.0, _number(row.get("CH_ALOCADA_2ª_ETAPA")))
+
+    def entry(job_function: str, regime: str, values: dict[str, float], level: str) -> dict[str, Any]:
+        allocatable = values["allocatable"]
+        # Utilização média das duas etapas. Como o denominador é o mesmo teto
+        # semanal nas duas metades, a média dos percentuais equivale à média
+        # das horas sobre a CH alocável — é a ocupação do módulo inteiro.
+        #
+        # Deliberadamente não é o pico: o pico responde "estourou o teto em
+        # alguma etapa" e continua na planilha, em UTILIZAÇÃO_PICO. A média
+        # responde "quanto da capacidade o módulo consumiu", e por isso pode
+        # esconder uma etapa cheia ao lado de uma vazia — as duas seguem
+        # abertas na leitura da célula.
+        mean_allocated = (values["first_stage"] + values["second_stage"]) / 2
+        return {
+            "job_function": job_function,
+            "regime": regime,
+            "level": level,
+            "headcount": int(values["headcount"]),
+            "contracted_hours": round(values["contracted"], 2),
+            "allocatable_hours": round(allocatable, 2),
+            "allocated_hours": round(mean_allocated, 2),
+            "first_stage_hours": round(values["first_stage"], 2),
+            "second_stage_hours": round(values["second_stage"], 2),
+            "utilization_pct": (
+                round(100 * mean_allocated / allocatable, 2) if allocatable else None
+            ),
+        }
+
+    rows: list[dict[str, Any]] = []
+    overall = {
+        "headcount": 0.0,
+        "contracted": 0.0,
+        "allocatable": 0.0,
+        "first_stage": 0.0,
+        "second_stage": 0.0,
+    }
+    for job_function in sorted(groups):
+        regimes = groups[job_function]
+        totals = {
+            field: sum(values[field] for values in regimes.values())
+            for field in ("headcount", "contracted", "allocatable", "first_stage", "second_stage")
+        }
+        rows.append(entry(job_function, "Total do cargo", totals, "cargo"))
+        for key in sorted(regimes):
+            rows.append(entry(job_function, key[1], regimes[key], "regime"))
+        for field in overall:
+            overall[field] += totals[field]
+    if rows:
+        rows.append(entry("Total geral", "", overall, "total"))
+    return rows
+
+
 def _dashboard_teaching_capacity(value: Any, hours_per_transmission: int) -> float:
     """Return the CH_LETIVA usable by whole transmissions on the dashboard."""
     teaching_hours = max(0.0, _number(value))
@@ -491,16 +658,18 @@ def build_dashboard(
     used_teachers = len(used_badges)
     hours_per_transmission = int(summary.get("hours_per_transmission", 2) or 2)
 
-    discipline_by_order = Counter(_clean(row.get("ORDEM")) for row in allocations)
+    discipline_by_order = Counter(_canonical(row.get("ORDEM")) for row in allocations)
     first_demand = hours_per_transmission * (
         discipline_by_order.get("1ª", 0) + discipline_by_order.get("ESTENDIDA", 0)
     )
     second_demand = hours_per_transmission * (
         discipline_by_order.get("2ª", 0) + discipline_by_order.get("ESTENDIDA", 0)
     )
+    # Mesma fonte da tabela por cargo: prefere CH_LETIVA_ALOCÁVEL da planilha,
+    # que já zera o contrato Stricto. Reler CH_LETIVA aqui somava a alguém sem
+    # teto semanal uma capacidade que a outra tabela do mesmo payload nega.
     active_capacity = sum(
-        _dashboard_teaching_capacity(row.get("CH_LETIVA"), hours_per_transmission)
-        for row in active_rows
+        _allocatable_hours(row, hours_per_transmission) for row in active_rows
     )
 
     day_data: dict[str, dict[str, Any]] = defaultdict(lambda: {"disciplines": 0, "teachers": set()})
@@ -524,12 +693,14 @@ def build_dashboard(
         for cluster, count in cluster_hours.most_common()
     ]
 
+    job_function_rows = _teachers_by_job_function(teachers, hours_per_transmission)
+
     stage_allocated_hours = {
         "first_stage": hours_per_transmission * sum(
-            _clean(row.get("ORDEM")) in {"1ª", "ESTENDIDA"} for row in allocated_rows
+            _canonical(row.get("ORDEM")) in {"1ª", "ESTENDIDA"} for row in allocated_rows
         ),
         "second_stage": hours_per_transmission * sum(
-            _clean(row.get("ORDEM")) in {"2ª", "ESTENDIDA"} for row in allocated_rows
+            _canonical(row.get("ORDEM")) in {"2ª", "ESTENDIDA"} for row in allocated_rows
         ),
     }
     validation = manifest.get("phases", {}).get("validation", {})
@@ -568,6 +739,7 @@ def build_dashboard(
         ],
         "stage_hours": stage_allocated_hours,
         "charts": {"by_day": by_day, "demand_hours_by_cluster": cluster_items},
+        "teachers_by_job_function": job_function_rows,
         "filters": {"selected": selected_filters, "options": _filter_options(all_allocations)},
         "guardrails": {
             "validation": validation.get("status"),

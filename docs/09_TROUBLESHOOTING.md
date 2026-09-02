@@ -10,6 +10,23 @@
 
 Se a API responde mas a tela não abre, refaça o build do frontend.
 
+## O OPTIMAL.bat encerra com "Já existe uma instância usando este diretório de dados"
+
+O diretório operacional aceita uma instância por vez, e a reserva é registrada
+em `data\.aplicacao.lock`. A mensagem traz o PID de quem a mantém: encerre
+aquela janela do OPTIMAL e abra de novo, ou aponte esta abertura para outro
+diretório com `--dados`.
+
+A reserva pertence ao sistema operacional, que a devolve assim que o processo
+dono termina — inclusive quando a janela é fechada no X ou o processo é morto.
+O arquivo que sobra de um encerramento assim não impede a próxima abertura e é
+reaproveitado sozinho; não é preciso apagá-lo.
+
+Em pacotes anteriores à 2.0 a checagem comparava apenas o PID gravado no
+arquivo. Como o Windows recicla PIDs, um arquivo órfão podia coincidir com um
+processo do sistema e travar todas as aberturas seguintes com código 1. Nesses
+pacotes, a saída é apagar `data\.aplicacao.lock` com a aplicação fechada.
+
 ## O OPTIMAL.bat pergunta se deve instalar as dependências
 
 O lote encontrou o `.venv` ausente, incompleto ou com versões diferentes das

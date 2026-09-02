@@ -5,6 +5,8 @@ import ScenariosPage from "./pages/ScenariosPage";
 import InsightsPage from "./pages/InsightsPage";
 import ExportPage from "./pages/ExportPage";
 import OptimalLogo from "./components/OptimalLogo";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { BUILD_STAMP } from "./types";
 
 type Route = "processamento" | "dashboard" | "insights" | "cenarios" | "exportacao";
 type ThemeChoice = "light" | "dark" | "system";
@@ -122,7 +124,9 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div className="environment-badge">VERSÃO 2.0</div>
+          <div className="environment-badge" title={`Build ${BUILD_STAMP} · se este carimbo não muda após uma nova versão, a página veio do cache do navegador`}>
+            VERSÃO 2.0<small>build {BUILD_STAMP}</small>
+          </div>
           <div className="developer-credit" aria-label="Créditos do autor">
             <span>Desenvolvido por</span>
             <strong>Guilherme Henrique Risson Silva</strong>
@@ -134,11 +138,15 @@ export default function App() {
         {/* A chave por rota remonta o quadro a cada troca de aba, que e o
             que dispara a transicao de entrada declarada no CSS. */}
         <div className="route-frame" key={route}>
-          {route === "processamento" && <ProcessPage />}
-          {route === "dashboard" && <DashboardPage />}
-          {route === "insights" && <InsightsPage />}
-          {route === "cenarios" && <ScenariosPage />}
-          {route === "exportacao" && <ExportPage />}
+          {/* A barreira fica por rota: uma falha em uma aba não pode levar a
+              casca da aplicação junto, deixando o operador sem navegação. */}
+          <ErrorBoundary area={routeTitles[route]}>
+            {route === "processamento" && <ProcessPage />}
+            {route === "dashboard" && <DashboardPage />}
+            {route === "insights" && <InsightsPage />}
+            {route === "cenarios" && <ScenariosPage />}
+            {route === "exportacao" && <ExportPage />}
+          </ErrorBoundary>
         </div>
       </main>
     </div>

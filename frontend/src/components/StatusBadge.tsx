@@ -31,6 +31,9 @@ const PARTIAL_GUARANTEE_STATES = [
   "OTIMO_COM_MARGEM",
   "INTERROMPIDA",
   "UNKNOWN",
+  // Lote que terminou com parte dos módulos fora, e rodada que cobriu parte
+  // das ofertas: entregam resultado, mas não o resultado completo.
+  "PARCIAL",
 ];
 
 export function statusTone(value: string): StatusTone {

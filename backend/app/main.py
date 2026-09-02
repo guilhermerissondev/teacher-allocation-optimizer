@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,12 +26,24 @@ from .services.jobs import (
     read_json,
 )
 from .services.insights import build_insights
-from .services.resets import reset_primary_rounds, reset_saved_scenarios
+from .services.batches import (
+    BatchError,
+    create_batch,
+    inspect_workbook,
+    public_batch,
+    runnable_uploads,
+)
+from .services.resets import (
+    delete_module_batch,
+    delete_scenario_study_records,
+    reset_primary_rounds,
+    reset_saved_scenarios,
+)
 from .services.scenarios import (
     ScenarioError,
     ScenarioManager,
     ScenarioQueueFull,
-    add_scenario_change,
+    add_scenario_changes_batch,
     add_scenario_policy,
     compare_scenario,
     delete_scenario_change as remove_scenario_change,
@@ -38,10 +51,22 @@ from .services.scenarios import (
     public_scenario,
     source_catalog,
 )
+from .services.studies import (
+    StudyError,
+    add_study_premise,
+    available_batches,
+    create_study,
+    delete_study_premise as remove_study_premise,
+    project_study,
+    public_study,
+    runnable_scenarios,
+    study_catalog,
+)
 from .services.uploads import (
     UploadQuotaError,
     UploadValidationError,
     cleanup_upload_storage,
+    safe_filename,
     save_upload_stream,
     write_validation_workbook,
 )
@@ -67,12 +92,37 @@ class ScenarioCreate(BaseModel):
     description: str = Field(default="", max_length=1000)
 
 
-class ScenarioChangeCreate(BaseModel):
+class BatchRunCreate(BaseModel):
+    confirm_warnings: bool = False
+
+
+class ScenarioChangeBatchCreate(BaseModel):
     change_type: str
     entity_type: str
-    row_number: int = Field(ge=2)
     field_name: str
-    new_value: str | int | float
+    row_numbers: list[int] = Field(min_length=1, max_length=500)
+    new_value: str | int | float | None = None
+    # Ajuste relativo de CH_LETIVA: preserva as diferenças de carga entre os
+    # docentes selecionados, em vez de nivelar todos no mesmo valor.
+    adjustment: int | None = None
+
+
+class StudyCreate(BaseModel):
+    batch_id: str
+    modules: list[int] = Field(min_length=1, max_length=4)
+    name: str = Field(min_length=3, max_length=120)
+    description: str = Field(default="", max_length=1000)
+
+
+class StudyPremiseCreate(BaseModel):
+    premise_type: str
+    target_type: str
+    # Vários alvos por submissão: "e se eu movesse estes três cursos para
+    # quarta" é uma pergunta só, e vira uma premissa por curso.
+    target_values: list[str] = Field(min_length=1, max_length=100)
+    field_name: str
+    new_value: str | int | float | None = None
+    adjustment: int | None = None
 
 
 class ScenarioPolicyCreate(BaseModel):
@@ -207,6 +257,147 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    def _parse_modules(raw: str) -> list[int]:
+        try:
+            return [int(item) for item in raw.replace(";", ",").split(",") if item.strip()]
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="A lista de módulos deve conter apenas números separados por vírgula.",
+            ) from exc
+
+    @app.post("/api/batches/inspect")
+    def inspect_batch_files(
+        files: Annotated[list[UploadFile], File(description="Planilhas .xlsx")],
+    ) -> dict:
+        """Mostra quais módulos existem em cada planilha antes de montar o lote."""
+        results: list[dict] = []
+        workdir = settings.batch_dir / f"inspecao-{uuid.uuid4().hex}"
+        workdir.mkdir(parents=True, exist_ok=True)
+        try:
+            for position, item in enumerate(files, start=1):
+                try:
+                    name = safe_filename(item.filename)
+                except UploadValidationError as exc:
+                    results.append({"filename": item.filename or "", "error": str(exc)})
+                    continue
+                stored = workdir / f"inspecao_{position:02d}.xlsx"
+                try:
+                    with stored.open("wb") as target:
+                        shutil.copyfileobj(item.file, target, length=1024 * 1024)
+                    found = inspect_workbook(stored)
+                except BatchError as exc:
+                    results.append({"filename": name, "error": str(exc)})
+                    continue
+                finally:
+                    item.file.close()
+                results.append({"filename": name, **found})
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        available = sorted({
+            entry["module"]
+            for item in results
+            for entry in item.get("modules", [])
+            if entry["supported"]
+        })
+        return {"files": results, "available_modules": available}
+
+    @app.post("/api/batches", status_code=201)
+    def create_module_batch(
+        files: Annotated[list[UploadFile], File(description="Planilhas .xlsx")],
+        modules: Annotated[str, Form(description="Módulos separados por vírgula")],
+        name: Annotated[str, Form(max_length=120)] = "",
+        criterion: Annotated[
+            str,
+            Form(pattern="^(PERFIL_EXATO|CLUSTER_PREFERENCIAL|CLUSTER_PURO)$"),
+        ] = "PERFIL_EXATO",
+        profile: Annotated[
+            str,
+            Form(pattern="^(PROVA_COMPLETA|COBERTURA_PROVADA|MARGEM_ACEITA|EXPLORACAO_RAPIDA)$"),
+        ] = "PROVA_COMPLETA",
+        margin_offers: Annotated[int | None, Form(ge=1, le=100)] = None,
+        require_optimal: Annotated[bool, Form()] = True,
+        time_limit_seconds: Annotated[float | None, Form(gt=0)] = None,
+        confirm_warnings: Annotated[bool, Form()] = False,
+    ) -> dict:
+        try:
+            with coordinator.exclusive():
+                return create_batch(
+                    [(item.filename, item.file) for item in files],
+                    _parse_modules(modules),
+                    settings,
+                    database,
+                    name=name,
+                    criterion=criterion,
+                    profile=profile,
+                    margin_offers=margin_offers,
+                    require_optimal=require_optimal,
+                    time_limit_seconds=time_limit_seconds,
+                    confirm_warnings=confirm_warnings,
+                )
+        except UploadQuotaError as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (BatchError, UploadValidationError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            for item in files:
+                item.file.close()
+
+    @app.get("/api/batches")
+    def list_module_batches(
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> list[dict]:
+        return [public_batch(database, batch) for batch in database.list_batches(limit)]
+
+    @app.get("/api/batches/{batch_id}")
+    def get_module_batch(batch_id: str) -> dict:
+        batch = database.get_batch(batch_id)
+        if not batch:
+            raise HTTPException(status_code=404, detail="Lote não encontrado.")
+        return public_batch(database, batch)
+
+    @app.delete("/api/batches/{batch_id}")
+    def delete_module_batch_endpoint(batch_id: str) -> dict:
+        if not database.get_batch(batch_id):
+            raise HTTPException(status_code=404, detail="Lote inexistente.")
+        try:
+            with coordinator.exclusive(), scenario_manager.exclusive():
+                return delete_module_batch(settings, database, batch_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/batches/{batch_id}/runs", status_code=202)
+    def run_module_batch(batch_id: str, payload: BatchRunCreate | None = None) -> dict:
+        batch = database.get_batch(batch_id)
+        if not batch:
+            raise HTTPException(status_code=404, detail="Lote não encontrado.")
+        # A confirmação chega aqui, e não na criação: o operador precisa ler as
+        # ressalvas antes de aceitá-las, como já acontece na rodada única.
+        confirm = bool(payload.confirm_warnings) if payload else False
+        uploads = runnable_uploads(database, batch, confirm)
+        if not uploads:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Nenhum módulo do lote está liberado para execução. "
+                    "Confira a validação de cada módulo e confirme as ressalvas."
+                ),
+            )
+        try:
+            manager.create_batch(
+                uploads,
+                require_optimal=bool(batch["require_optimal"]),
+                time_limit_seconds=batch["time_limit_seconds"],
+                batch_id=batch_id,
+            )
+        except JobQueueFull as exc:
+            raise HTTPException(
+                status_code=429, detail=str(exc), headers={"Retry-After": "5"}
+            ) from exc
+        except JobManagerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return public_batch(database, database.get_batch(batch_id) or batch)
+
     @app.post("/api/jobs", status_code=202)
     def create_job(payload: JobCreate) -> dict:
         try:
@@ -327,21 +518,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ScenarioError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @app.post("/api/scenarios/{scenario_id}/changes", status_code=201)
-    def create_scenario_change(
+    @app.post("/api/scenarios/{scenario_id}/changes/batch", status_code=201)
+    def create_scenario_changes_batch(
         scenario_id: str,
-        payload: ScenarioChangeCreate,
+        payload: ScenarioChangeBatchCreate,
     ) -> dict:
         try:
             with scenario_manager.exclusive():
-                return add_scenario_change(
+                return add_scenario_changes_batch(
                     database,
                     scenario_id,
                     change_type=payload.change_type,
                     entity_type=payload.entity_type,
-                    row_number=payload.row_number,
                     field_name=payload.field_name,
+                    row_numbers=payload.row_numbers,
                     new_value=payload.new_value,
+                    adjustment=payload.adjustment,
                 )
         except ScenarioError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -424,6 +616,158 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             database.promote_scenario(scenario_id, job["id"], scenario["module"])
             refreshed = database.get_scenario(scenario_id)
             return public_scenario(database, refreshed or {})
+
+    # ------------------------------------------------------------------
+    # Estudos em lote: a mesma premissa aplicada a vários módulos do ano.
+    # ------------------------------------------------------------------
+
+    @app.get("/api/studies/baselines")
+    def list_study_baselines() -> list[dict]:
+        """Lotes com rodada concluída, para servir de base a um estudo."""
+        return available_batches(database)
+
+    @app.post("/api/studies", status_code=201)
+    def create_scenario_study(payload: StudyCreate) -> dict:
+        with scenario_manager.exclusive():
+            try:
+                return create_study(
+                    settings,
+                    database,
+                    batch_id=payload.batch_id,
+                    modules=payload.modules,
+                    name=payload.name,
+                    description=payload.description,
+                )
+            except StudyError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/studies")
+    def list_scenario_studies(
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ) -> list[dict]:
+        return [public_study(database, study) for study in database.list_studies(limit)]
+
+    @app.get("/api/studies/{study_id}")
+    def get_scenario_study(study_id: str) -> dict:
+        study = database.get_study(study_id)
+        if not study:
+            raise HTTPException(status_code=404, detail="Estudo não encontrado.")
+        return public_study(database, study)
+
+    @app.get("/api/studies/{study_id}/catalog")
+    def get_study_catalog(study_id: str) -> dict:
+        if not database.get_study(study_id):
+            raise HTTPException(status_code=404, detail="Estudo não encontrado.")
+        try:
+            return study_catalog(database, study_id)
+        except (StudyError, ScenarioError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/studies/{study_id}/projection")
+    def get_study_projection(study_id: str) -> dict:
+        """O que cada premissa produziu em cada módulo, sem executar nada."""
+        if not database.get_study(study_id):
+            raise HTTPException(status_code=404, detail="Estudo não encontrado.")
+        try:
+            with scenario_manager.exclusive():
+                return {"modules": project_study(database, study_id)}
+        except (StudyError, ScenarioError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/studies/{study_id}/premises", status_code=201)
+    def create_study_premise(study_id: str, payload: StudyPremiseCreate) -> dict:
+        if not database.get_study(study_id):
+            raise HTTPException(status_code=404, detail="Estudo não encontrado.")
+        try:
+            with scenario_manager.exclusive():
+                return add_study_premise(
+                    database,
+                    study_id,
+                    premise_type=payload.premise_type,
+                    target_type=payload.target_type,
+                    target_values=payload.target_values,
+                    field_name=payload.field_name,
+                    new_value=payload.new_value,
+                    adjustment=payload.adjustment,
+                )
+        except (StudyError, ScenarioError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.delete("/api/studies/{study_id}/premises/{premise_id}", status_code=204)
+    def delete_study_premise_endpoint(study_id: str, premise_id: str) -> None:
+        try:
+            with scenario_manager.exclusive():
+                removed = remove_study_premise(database, study_id, premise_id)
+        except (StudyError, ScenarioError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if not removed:
+            raise HTTPException(status_code=404, detail="Premissa não encontrada.")
+
+    @app.post("/api/studies/{study_id}/runs", status_code=202)
+    def run_scenario_study(study_id: str) -> dict:
+        study = database.get_study(study_id)
+        if not study:
+            raise HTTPException(status_code=404, detail="Estudo não encontrado.")
+        try:
+            # Reprojeta antes de enfileirar: o que vai para o motor precisa ser
+            # o que as premissas dizem agora, e não o que elas diziam quando a
+            # última premissa foi editada.
+            with scenario_manager.exclusive():
+                project_study(database, study_id)
+                ready = runnable_scenarios(database, study_id)
+            if not ready:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Nenhum módulo do estudo tem alteração para simular. "
+                        "Confira o efeito das premissas em cada módulo."
+                    ),
+                )
+            scenario_manager.create_study_run(ready)
+            database.update_study(study_id, status="EXECUTANDO")
+        except ScenarioQueueFull as exc:
+            raise HTTPException(
+                status_code=429, detail=str(exc), headers={"Retry-After": "5"}
+            ) from exc
+        except (StudyError, ScenarioError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return public_study(database, database.get_study(study_id) or study)
+
+    @app.get("/api/studies/{study_id}/comparison")
+    def scenario_study_comparison(study_id: str) -> dict:
+        """Comparação módulo a módulo, cada uma contra a sua própria baseline."""
+        study = database.get_study(study_id)
+        if not study:
+            raise HTTPException(status_code=404, detail="Estudo não encontrado.")
+        modules: list[dict] = []
+        for entry in database.study_modules(study_id):
+            scenario_id = entry["scenario_id"]
+            record: dict = {
+                "module": int(entry["module"]),
+                "scenario_id": scenario_id,
+                "comparison": None,
+                "reason": "",
+            }
+            if scenario_id:
+                try:
+                    record["comparison"] = compare_scenario(database, str(scenario_id))
+                except ScenarioError as exc:
+                    record["reason"] = str(exc)
+            modules.append(record)
+        return {
+            "study": public_study(database, study),
+            "modules": modules,
+        }
+
+    @app.delete("/api/studies/{study_id}")
+    def delete_scenario_study(study_id: str) -> dict:
+        if not database.get_study(study_id):
+            raise HTTPException(status_code=404, detail="Estudo não encontrado.")
+        try:
+            with coordinator.exclusive(), scenario_manager.exclusive():
+                return delete_scenario_study_records(settings, database, study_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: str) -> dict:

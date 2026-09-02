@@ -1,119 +1,80 @@
-# Teacher Allocation Optimizer
+# Ferramenta de Alocação Docente — versão 2.0
 
-<!-- TODO: descomentar quando o CI estiver ativo (Fase 1 do plano)
-![CI](https://github.com/guilhermehrsilva/teacher-allocation-optimizer/actions/workflows/ci.yml/badge.svg)
--->
-![Python](https://img.shields.io/badge/python-3.12%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+Versão de produção local para operação individual em Windows e apresentação executiva. O pacote
+reúne validação da planilha, alocação CP-SAT auditável, Dashboard, Insights e um
+motor secundário isolado para simulação de cenários.
 
-**How do you optimally assign hundreds of teachers to courses while respecting eligibility rules, workload limits, and institutional constraints?**
+A versão 2.0 torna o critério de elegibilidade uma escolha do usuário na
+importação: perfil da disciplina, cluster com perfil preferencial ou cluster
+puro. O padrão continua sendo perfil da disciplina, idêntico à versão 1.0.
 
-Full-stack optimization system that automates teacher-to-course allocation using CP-SAT constraint programming, with data validation, audit trails, scenario simulation, and a web dashboard for operational monitoring.
+## Início rápido no Windows
 
-<!-- TODO: substituir por um GIF de 10-15s mostrando upload → validação → alocação → dashboard.
-     Grave com ScreenToGif (Windows). É o item de maior impacto deste README. -->
-<!-- ![Demo](docs/evidencias/demo.gif) -->
+1. Instale Python 3.12 ou 3.13 estável, 64 bits.
+2. Execute `OPTIMAL.bat`. Ele verifica as dependências da máquina e, quando
+   falta alguma, pergunta se deve instalá-la antes de iniciar.
+3. O navegador abrirá em `http://127.0.0.1:8000`.
 
-<!-- TODO: publicar com dados sintéticos e adicionar aqui:
-**[▶ Live demo](https://...)** — sample spreadsheet included, no real data required.
--->
+Quem preferir os passos separados executa `scripts\instalar.ps1` uma única vez e
+depois `iniciar.ps1`.
 
-## Why this exists
+O frontend já está compilado. Node.js só é necessário para desenvolvimento da
+interface, não para executar a versão de apresentação. Para recompilar, use
+Node.js 20.19+ ou 22.12+.
 
-Teacher allocation in a large distance-learning operation was handled manually through spreadsheets: slow, hard to audit, and impossible to simulate alternatives. Each round required reconciling eligibility rules, workload caps, and institutional policy by hand.
+## Fluxo de uso
 
-This system turns that into a reproducible pipeline — validate, solve, audit, simulate — where every allocation round is traceable and every policy change can be tested before it is adopted.
+1. Em **Processamento**, selecione explicitamente o módulo e o critério de
+   elegibilidade, e envie a planilha.
+2. Corrija bloqueios ou confirme ressalvas da validação.
+3. Execute o motor principal e acompanhe validação, otimização, auditoria e publicação da rodada-base.
+4. Consulte **Dashboard** e **Insights** usando somente resultados publicados.
+5. Em **Cenários**, crie uma simulação isolada, altere premissas, reprocesse, compare e promova somente quando os guardrails aprovarem. A promoção torna o cenário a referência oficial do módulo; a rodada-base não é oficial por si só.
 
-<!-- TODO: preencher com números reais. Sem eles o projeto parece um exercício.
-| Metric | Before | After |
-|--------|--------|-------|
-| Time per allocation round | ? hours | ? minutes |
-| Teachers handled | — | ? |
-| Courses handled | — | ? |
-| Constraints enforced | manual | ? automated rules |
--->
+## Arquitetura do pacote
 
-## Key highlights
-
-| Feature | Detail |
-|---------|--------|
-| Solver | Google OR-Tools CP-SAT |
-| Approach | Constraint programming + GRASP metaheuristic |
-| Validation | Automated rule checking with inconsistency reports |
-| Scenarios | Isolated what-if engine for policy simulation |
-| Audit | Full traceability per round (JSON + XLSX) |
-| Interface | React + FastAPI web dashboard |
-| Quality | Test suite, SBOM (CycloneDX), third-party license inventory |
-
-## Stack
-
-`Python 3.12` · `OR-Tools (CP-SAT)` · `FastAPI` · `React 19` · `TypeScript` · `Vite` · `Pandas` · `SQLite`
-
-## How it works
-
-1. **Upload** — institutional spreadsheet with teachers, courses, and constraints
-2. **Validate** — automated rule-checking flags inconsistencies before solving
-3. **Optimize** — CP-SAT solver finds optimal teacher-course assignments
-4. **Audit** — every round generates traceability reports
-5. **Simulate** — an isolated secondary engine runs alternative scenarios without touching the primary solver
-6. **Monitor** — web dashboard tracks execution and results
-
-The two engines are deliberately separated: the scenario tab can never modify or silently replace the primary solver's published round.
-
-## Architecture
-
-```
-├── engines/
-│   ├── primary/        # main solver, preserved and versioned
-│   └── scenarios/      # isolated what-if engine
-├── backend/            # FastAPI, orchestration, audit, security middleware
-├── frontend/           # React + TypeScript dashboard
-├── docs/               # executive, functional and technical documentation
-├── scripts/            # install, test and release tooling
-└── exemplos/           # synthetic sample data
+```text
+vbeta1.0/
+├── backend/              API FastAPI, SQLite e orquestração
+├── frontend/             React/TypeScript e build pronto em dist/
+├── engines/primary/      solver principal preservado
+├── engines/scenarios/    solver secundário exclusivo de cenários
+├── docs/                 documentação executiva, funcional e técnica
+├── scripts/              instalação e testes
+├── data/                 marcador; dados reais ficam fora do pacote
+├── executar.py           launcher local de produção
+└── iniciar.ps1           atalho de execução no Windows
 ```
 
-## Running locally
+Os motores são deliberadamente separados. A aba Cenários nunca modifica nem
+substitui automaticamente o solver principal.
 
-```bash
-git clone https://github.com/guilhermehrsilva/teacher-allocation-optimizer.git
-cd teacher-allocation-optimizer
+## Documentação
 
-# Backend — Python 3.12 or 3.13, 64-bit
-pip install -r requirements.txt
+Comece por [Visão executiva](docs/00_VISAO_EXECUTIVA.md) e
+[Instalação e operação](docs/06_INSTALACAO_E_OPERACAO.md). As regras de negócio,
+arquitetura, solvers, API, interface, segurança, homologação e solução de
+problemas estão detalhadas no diretório `docs`.
 
-# Frontend — builds the dashboard the API serves
-pwsh scripts/construir_frontend.ps1
+## Segurança
 
-python executar.py
+Esta versão foi desenhada para uso local em `127.0.0.1`. Ela não possui
+autenticação nem TLS e não deve ser publicada em rede. Planilhas e resultados
+podem conter dados pessoais; consulte a documentação de segurança antes de
+copiar, compartilhar ou reter os artefatos.
+
+## Verificação
+
+```powershell
+.\scripts\testar.ps1
 ```
 
-The dashboard opens at `http://127.0.0.1:8000`. A synthetic sample spreadsheet is available in `exemplos/` — no real institutional data is required or included in this repository.
+O release registra versão, testes, hashes e limitações conhecidas nos documentos
+de qualidade e homologação. Consulte também as [evidências de QA](docs/evidencias/README.md)
+e os [avisos de terceiros](THIRD_PARTY_NOTICES.md).
 
-The build step needs Node.js 20.19+ or 22.12+ and runs once. The production bundle is not versioned, so a fresh clone builds it locally; `executar.py` refuses to start without it rather than serving a stale interface.
+Para conferir se nenhum arquivo do pacote foi alterado depois da homologação:
 
-<!-- TODO Fase 1: substituir por
-```bash
-docker compose up
+```powershell
+python .\scripts\integridade_release.py --verificar
 ```
--->
-
-### Frontend development
-
-```bash
-cd frontend && npm install && npm run dev
-```
-
-Requires Node.js 20.19+ or 22.12+. The production build is generated at release time and is not versioned.
-
-## Documentation
-
-Full documentation lives in [`docs/`](docs/) — start with the [Operational Manual](docs/MANUAL_OPERACIONAL.md) for setup and usage, or the [executive overview](docs/00_VISAO_EXECUTIVA.md) for the business context (Portuguese). Business rules, architecture, solver design, API, security, and QA are documented separately.
-
-## Data privacy
-
-This repository contains **no real institutional data**. All examples are synthetic. Real datasets are kept outside the package by design — see [`docs/07_SEGURANCA_PRIVACIDADE.md`](docs/07_SEGURANCA_PRIVACIDADE.md).
-
-## License
-
-MIT — see [LICENSE](LICENSE).

@@ -133,7 +133,8 @@ class ReportingTests(unittest.TestCase):
             {"first_stage": 2, "second_stage": 0},
             payload["allocated_stage_hours"],
         )
-        self.assertEqual(1, payload["average_weekly_allocated_hours"])
+        # Stricto fica fora da apuracao de teto e o outro docente nao tem carga.
+        self.assertEqual(0, payload["teachers_over_capacity"])
         self.assertEqual(
             {"SEM_DOCENTE_COM_PERFIL_E_CARGA": 1},
             payload["unassigned_reasons"],
@@ -173,7 +174,10 @@ class ReportingTests(unittest.TestCase):
 
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
         try:
-            self.assertEqual(["RESUMO", "ALOCACOES", "DOCENTES"], workbook.sheetnames)
+            self.assertEqual(
+                ["RESUMO", "ALOCACOES", "DOCENTES", "DOCENTES POR CARGO"],
+                workbook.sheetnames,
+            )
             allocations = workbook["ALOCACOES"]
             headers = [cell.value for cell in allocations[1]]
             self.assertEqual(
@@ -208,21 +212,150 @@ class ReportingTests(unittest.TestCase):
             stricto = next(row for row in rows if row["CHAPA"] == "000000000001")
             self.assertEqual(0, stricto["CH_CONTRATADA"])
             self.assertEqual(0, stricto["CH_LETIVA"])
-            self.assertEqual(2, stricto["CH_ALOCADA"])
-            self.assertEqual(0, stricto["CH_DISPONÍVEL"])
-            self.assertEqual(0, stricto["UTILIZAÇÃO"])
+            self.assertEqual(1, stricto["QTD_1ª_ORDEM"])
+            self.assertEqual(0, stricto["QTD_2ª_ORDEM"])
+            self.assertEqual(0, stricto["QTD_ESTENDIDA"])
             self.assertEqual(1, stricto["QTD_TRANSMISSÕES"])
             self.assertEqual(1, stricto["QTD_DISCIPLINAS_1ª_ETAPA"])
-            self.assertEqual(0, stricto["UTILIZAÇÃO_1ª_ETAPA"])
+            self.assertEqual(2, stricto["CH_ALOCADA_1ª_ETAPA"])
             self.assertEqual(0, stricto["QTD_DISCIPLINAS_2ª_ETAPA"])
+            self.assertEqual(0, stricto["CH_ALOCADA_2ª_ETAPA"])
+            self.assertEqual(2, stricto["CH_ALOCADA_PICO"])
+            # Stricto preserva CH_LETIVA zero: folga zerada, percentuais em 0%
+            # e o teto semanal nao se aplica.
+            self.assertEqual(0, stricto["CH_DISPONÍVEL_1ª_ETAPA"])
+            self.assertEqual(0, stricto["CH_DISPONÍVEL_2ª_ETAPA"])
+            self.assertEqual(0, stricto["CH_DISPONÍVEL"])
+            self.assertEqual(0, stricto["UTILIZAÇÃO_1ª_ETAPA"])
             self.assertEqual(0, stricto["UTILIZAÇÃO_2ª_ETAPA"])
+            self.assertEqual(0, stricto["UTILIZAÇÃO_PICO"])
+            self.assertEqual("NSA", stricto["EXCEDE_CH_LETIVA"])
             self.assertNotIn("MODELO_CONTRATO", headers)
         finally:
             workbook.close()
 
         self.assertEqual([], list(self.output_dir.rglob("*.tmp")))
 
-    def test_reports_stage_counts_and_weighted_general_utilization(self) -> None:
+    def test_breaks_down_teacher_usage_by_job_function_and_regime(self) -> None:
+        """A abertura por cargo do relatorio semanal, gerada pelo motor.
+
+        Cada cargo abre nos regimes de contratacao e fecha em Total Geral. Sem
+        CH letiva alocavel nao ha percentual: o contrato Stricto entra com NSA
+        em vez de um denominador zerado.
+        """
+        problem, result = reporting_fixture()
+
+        xlsx_path, _ = write_results(problem, result, self.output_dir)
+
+        workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+        try:
+            worksheet = workbook["DOCENTES POR CARGO"]
+            headers = [cell.value for cell in worksheet[1]]
+            self.assertEqual(
+                [
+                    "CARGO", "REGIME", "HEADCOUNT", "CH_CONTRATADA",
+                    "CH_LETIVA_ALOCÁVEL",
+                    "CH_ALOCADA_1ª_ETAPA", "UTILIZAÇÃO_1ª_ETAPA",
+                    "CH_ALOCADA_2ª_ETAPA", "UTILIZAÇÃO_2ª_ETAPA",
+                    "CH_ALOCADA_PICO", "UTILIZAÇÃO_PICO",
+                ],
+                headers,
+            )
+            rows = list(worksheet.iter_rows(min_row=2, values_only=True))
+            self.assertEqual(
+                [
+                    (
+                        "PROFESSOR DE ENSINO SUPERIOR PRESENCIAL",
+                        "TOTAL DO CARGO", 1, 0, 0, 2, "NSA", 0, "NSA", 2, "NSA",
+                    ),
+                    (
+                        "PROFESSOR DE ENSINO SUPERIOR PRESENCIAL",
+                        "T0 · 0h contratadas · Mensalista",
+                        1, 0, 0, 2, "NSA", 0, "NSA", 2, "NSA",
+                    ),
+                    (
+                        "PROFESSOR REGENTE",
+                        "TOTAL DO CARGO", 1, 40, 4, 0, 0.0, 0, 0.0, 0, 0.0,
+                    ),
+                    (
+                        "PROFESSOR REGENTE",
+                        "T40 · 40h contratadas", 1, 40, 4, 0, 0.0, 0, 0.0, 0, 0.0,
+                    ),
+                    (
+                        "TOTAL GERAL",
+                        "TOTAL GERAL", 2, 40, 4, 2, 0.5, 0, 0.0, 2, 0.5,
+                    ),
+                ],
+                rows,
+            )
+        finally:
+            workbook.close()
+
+    def test_flags_teacher_over_the_weekly_cap_in_one_stage(self) -> None:
+        """A bandeira de governanca do teto semanal.
+
+        A CH_LETIVA vale por semana, entao o estouro acontece dentro de uma
+        etapa: tres disciplinas na primeira metade somam 6h contra 4h de teto,
+        mesmo que a segunda metade caiba folgada. Sem esta bandeira o excesso
+        so apareceria comparando duas colunas na mao.
+        """
+        problem = Problem(
+            source=Path("base_m53.xlsx"),
+            teachers=(teacher(0),),
+            transmissions=(
+                transmission(0, order="1ª"),
+                transmission(1, order="1ª"),
+                transmission(2, order="1ª"),
+            ),
+        )
+        assignments = [
+            Assignment(
+                transmission_id=identifier,
+                teacher_id=0,
+                status="ALOCADA",
+                reason="",
+                eligible_teacher_count=1,
+                allocation_reason="Regra por etapa",
+            )
+            for identifier in range(3)
+        ]
+        result = AllocationResult(
+            status="COMPLETA",
+            solver_status="OPTIMAL",
+            assignments=assignments,
+            teacher_loads={0: 6},
+            objective_unassigned=0,
+            used_teacher_count=1,
+            zero_active_teacher_count=0,
+            high_capacity_score=12,
+            rescue_scarcity_score=0,
+            wall_time_seconds=0.1,
+            teacher_stage_loads={0: {"PRIMEIRA_ETAPA": 6, "SEGUNDA_ETAPA": 0}},
+        )
+
+        xlsx_path, json_path = write_results(problem, result, self.output_dir)
+
+        workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+        try:
+            worksheet = workbook["DOCENTES"]
+            headers = [cell.value for cell in worksheet[1]]
+            row = dict(zip(headers, next(worksheet.iter_rows(min_row=2, values_only=True))))
+            self.assertEqual(3, row["QTD_DISCIPLINAS_1ª_ETAPA"])
+            self.assertEqual(6, row["CH_ALOCADA_1ª_ETAPA"])
+            self.assertEqual(0, row["CH_ALOCADA_2ª_ETAPA"])
+            self.assertEqual(6, row["CH_ALOCADA_PICO"])
+            # A folga negativa e o sintoma; a bandeira e o diagnostico.
+            self.assertEqual(-2, row["CH_DISPONÍVEL_1ª_ETAPA"])
+            self.assertEqual(-2, row["CH_DISPONÍVEL"])
+            self.assertEqual(1.5, row["UTILIZAÇÃO_PICO"])
+            self.assertEqual("SIM", row["EXCEDE_CH_LETIVA"])
+        finally:
+            workbook.close()
+
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        self.assertEqual(1, payload["teachers_over_capacity"])
+
+    def test_reports_stage_counts_hours_and_peak_utilization(self) -> None:
         problem = Problem(
             source=Path("base_m53.xlsx"),
             teachers=(teacher(0),),
@@ -269,30 +402,130 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(
                 [
                     "NOME", "CHAPA", "NM_FUNCAO", "CH_CONTRATADA", "CH_LETIVA",
-                    "GESTOR", "STATUS", "PERFIL_DISCIPLINA", "CH_ALOCADA",
-                    "CH_DISPONÍVEL", "UTILIZAÇÃO", "QTD_TRANSMISSÕES",
-                    "SITUACAO_ALOCACAO", "QTD_DISCIPLINAS_1ª_ETAPA",
-                    "UTILIZAÇÃO_1ª_ETAPA", "QTD_DISCIPLINAS_2ª_ETAPA",
-                    "UTILIZAÇÃO_2ª_ETAPA",
+                    "CH_LETIVA_ALOCÁVEL", "GESTOR", "STATUS", "PERFIL_DISCIPLINA",
+                    "QTD_1ª_ORDEM", "QTD_2ª_ORDEM", "QTD_ESTENDIDA",
+                    "QTD_TRANSMISSÕES",
+                    "QTD_DISCIPLINAS_1ª_ETAPA", "CH_ALOCADA_1ª_ETAPA",
+                    "CH_DISPONÍVEL_1ª_ETAPA", "UTILIZAÇÃO_1ª_ETAPA",
+                    "QTD_DISCIPLINAS_2ª_ETAPA", "CH_ALOCADA_2ª_ETAPA",
+                    "CH_DISPONÍVEL_2ª_ETAPA", "UTILIZAÇÃO_2ª_ETAPA",
+                    "CH_ALOCADA_PICO", "CH_DISPONÍVEL", "UTILIZAÇÃO_PICO",
+                    "EXCEDE_CH_LETIVA", "SITUACAO_ALOCACAO",
                 ],
                 headers,
             )
             self.assertNotIn("MODELO_CONTRATO", headers)
+            # 4h de CH_LETIVA fecham dois blocos de 2h: a alocável coincide.
+            self.assertEqual(4, row["CH_LETIVA_ALOCÁVEL"])
+            # Uma disciplina de 1ª ordem e uma ESTENDIDA, com CH_LETIVA de 4h.
+            self.assertEqual(1, row["QTD_1ª_ORDEM"])
+            self.assertEqual(0, row["QTD_2ª_ORDEM"])
+            self.assertEqual(1, row["QTD_ESTENDIDA"])
             self.assertEqual(2, row["QTD_TRANSMISSÕES"])
+            # 1ª etapa: 1ª ordem + ESTENDIDA = 2 disciplinas = 4h = teto.
             self.assertEqual(2, row["QTD_DISCIPLINAS_1ª_ETAPA"])
+            self.assertEqual(4, row["CH_ALOCADA_1ª_ETAPA"])
+            self.assertEqual(0, row["CH_DISPONÍVEL_1ª_ETAPA"])
             self.assertEqual(1, row["UTILIZAÇÃO_1ª_ETAPA"])
+            # 2ª etapa: apenas a ESTENDIDA = 1 disciplina = 2h.
             self.assertEqual(1, row["QTD_DISCIPLINAS_2ª_ETAPA"])
+            self.assertEqual(2, row["CH_ALOCADA_2ª_ETAPA"])
+            self.assertEqual(2, row["CH_DISPONÍVEL_2ª_ETAPA"])
             self.assertEqual(0.5, row["UTILIZAÇÃO_2ª_ETAPA"])
-            self.assertEqual(3, row["CH_ALOCADA"])
-            self.assertEqual(1, row["CH_DISPONÍVEL"])
-            self.assertEqual(0.75, row["UTILIZAÇÃO"])
+            # O pico e a 1ª etapa; encosta no teto sem ultrapassar.
+            self.assertEqual(4, row["CH_ALOCADA_PICO"])
+            self.assertEqual(0, row["CH_DISPONÍVEL"])
+            self.assertEqual(1, row["UTILIZAÇÃO_PICO"])
+            self.assertEqual("NAO", row["EXCEDE_CH_LETIVA"])
             for header in (
-                "UTILIZAÇÃO",
+                "UTILIZAÇÃO_PICO",
                 "UTILIZAÇÃO_1ª_ETAPA",
                 "UTILIZAÇÃO_2ª_ETAPA",
             ):
                 column = headers.index(header) + 1
                 self.assertEqual("0.0%", worksheet.cell(2, column).number_format)
+        finally:
+            workbook.close()
+
+    def test_uses_allocatable_capacity_as_the_utilization_denominator(self) -> None:
+        """A hora que não fecha uma transmissão não conta como capacidade.
+
+        Um regente de 12h contratadas com 9h letivas só consegue receber quatro
+        disciplinas de 2h: as 8h são o teto real e a nona hora fica ociosa por
+        construção. Dividir a carga pelas 9h fazia todo o corpo docente parecer
+        menos ocupado do que o modelo permite.
+        """
+        capacity = 9
+        problem = Problem(
+            source=Path("base_m53.xlsx"),
+            teachers=(
+                Teacher(
+                    id=0,
+                    name="Regente T12",
+                    badge="000000000001",
+                    job_function="PROFESSOR REGENTE",
+                    contracted_capacity=12,
+                    teaching_capacity=capacity,
+                    manager="Gestor",
+                    status="ATIVO",
+                    profiles=PROFILE,
+                    profile_text="Gestão - Administração",
+                ),
+            ),
+            transmissions=tuple(transmission(item, order="1ª") for item in range(4)),
+        )
+        assignments = [
+            Assignment(
+                transmission_id=identifier,
+                teacher_id=0,
+                status="ALOCADA",
+                reason="",
+                eligible_teacher_count=1,
+                allocation_reason="Regra por etapa",
+            )
+            for identifier in range(4)
+        ]
+        result = AllocationResult(
+            status="COMPLETA",
+            solver_status="OPTIMAL",
+            assignments=assignments,
+            teacher_loads={0: 8},
+            objective_unassigned=0,
+            used_teacher_count=1,
+            zero_active_teacher_count=0,
+            high_capacity_score=0,
+            rescue_scarcity_score=0,
+            wall_time_seconds=0.1,
+        )
+
+        xlsx_path, _ = write_results(problem, result, self.output_dir)
+
+        workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+        try:
+            worksheet = workbook["DOCENTES"]
+            headers = [cell.value for cell in worksheet[1]]
+            row = dict(zip(headers, next(worksheet.iter_rows(min_row=2, values_only=True))))
+            # A CH_LETIVA da base fica intacta; a alocável desce para o múltiplo.
+            self.assertEqual(9, row["CH_LETIVA"])
+            self.assertEqual(8, row["CH_LETIVA_ALOCÁVEL"])
+            self.assertEqual(8, row["CH_ALOCADA_1ª_ETAPA"])
+            # Cheio contra o teto real: folga zero e 100%, não 8/9 = 88,9%.
+            self.assertEqual(0, row["CH_DISPONÍVEL_1ª_ETAPA"])
+            self.assertEqual(1, row["UTILIZAÇÃO_1ª_ETAPA"])
+            self.assertEqual(1, row["UTILIZAÇÃO_PICO"])
+            self.assertEqual(0, row["CH_DISPONÍVEL"])
+            self.assertEqual("NAO", row["EXCEDE_CH_LETIVA"])
+
+            por_cargo = workbook["DOCENTES POR CARGO"]
+            cabecalho = [cell.value for cell in por_cargo[1]]
+            linhas = [
+                dict(zip(cabecalho, values))
+                for values in por_cargo.iter_rows(min_row=2, values_only=True)
+            ]
+            regime = next(linha for linha in linhas if linha["REGIME"].startswith("T12"))
+            # A abertura por cargo soma a alocável, não a CH letiva da base.
+            self.assertEqual(8, regime["CH_LETIVA_ALOCÁVEL"])
+            self.assertEqual(1, regime["UTILIZAÇÃO_PICO"])
         finally:
             workbook.close()
 
