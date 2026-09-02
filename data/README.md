@@ -6,7 +6,7 @@ aplicação foi aberta. O caminho é identificado automaticamente a partir do
 próprio pacote, então copiar a pasta da aplicação leva os dados junto.
 
 Se esta pasta não aceitar escrita, a aplicação passa a usar
-`%LOCALAPPDATA%\UniCesumar\AlocacaoDocente\v<versão>`. Em qualquer caso, o
+`%LOCALAPPDATA%\Institution\AlocacaoDocente\v<versão>`. Em qualquer caso, o
 diretório em uso aparece na linha `Dados operacionais:` durante a inicialização.
 
 Para usar outro local, defina `ALOCACAO_DATA_DIR` ou execute:

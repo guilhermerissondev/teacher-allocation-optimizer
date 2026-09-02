@@ -33,7 +33,7 @@ O diretório padrão de dados reais é a pasta data da própria instalação:
 
     <pasta onde a aplicação foi aberta>\data
 
-Quando essa pasta não aceita escrita, a aplicação recorre a %LOCALAPPDATA%\UniCesumar\AlocacaoDocente\v<versão>. Como os dados ficam ao lado do executável, copiar, compactar ou sincronizar a pasta da aplicação leva junto bases reais: trate a pasta inteira com o mesmo cuidado devido ao diretório de dados e mantenha-a fora de sincronização automática em nuvem. O conteúdo operacional continua fora do MANIFESTO_RELEASE.json e do ZIP produzido por scripts\empacotar_release.py.
+Quando essa pasta não aceita escrita, a aplicação recorre a %LOCALAPPDATA%\Institution\AlocacaoDocente\v<versão>. Como os dados ficam ao lado do executável, copiar, compactar ou sincronizar a pasta da aplicação leva junto bases reais: trate a pasta inteira com o mesmo cuidado devido ao diretório de dados e mantenha-a fora de sincronização automática em nuvem. O conteúdo operacional continua fora do MANIFESTO_RELEASE.json e do ZIP produzido por scripts\empacotar_release.py.
 
 ## Controles implementados
 

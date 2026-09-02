@@ -160,7 +160,7 @@ distinguir numa olhada uma página servida do cache de uma recém-publicada.
   o comportamento com que foram produzidas;
 - o diretório operacional passou a ser a pasta data da própria instalação,
   identificada automaticamente; dados gravados por versões anteriores continuam
-  em %LOCALAPPDATA%\UniCesumar\AlocacaoDocente\vbeta1.0 e a aplicação informa
+  em %LOCALAPPDATA%\Institution\AlocacaoDocente\vbeta1.0 e a aplicação informa
   esse caminho na inicialização enquanto ele existir;
 - MANIFESTO_RELEASE.json e o build do frontend precisam ser regerados.
 

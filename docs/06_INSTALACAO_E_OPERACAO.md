@@ -107,7 +107,7 @@ Os dados operacionais reais ficam por padrão na pasta data da instalação, ao 
 
 O caminho é identificado automaticamente a partir do próprio pacote, portanto copiar a pasta da aplicação leva junto uploads, banco e resultados. A linha "Dados operacionais:" impressa na inicialização mostra o diretório realmente em uso.
 
-Se a pasta da instalação não aceitar escrita (Program Files, unidade de rede protegida), o padrão passa a ser %LOCALAPPDATA%\UniCesumar\AlocacaoDocente\v<versão>.
+Se a pasta da instalação não aceitar escrita (Program Files, unidade de rede protegida), o padrão passa a ser %LOCALAPPDATA%\Institution\AlocacaoDocente\v<versão>.
 
 Defina ALOCACAO_DATA_DIR ou use --dados somente quando precisar de outra pasta gravável e estável.
 

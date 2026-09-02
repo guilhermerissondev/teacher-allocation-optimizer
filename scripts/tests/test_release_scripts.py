@@ -562,7 +562,7 @@ class DiretorioOperacionalPadraoTests(WorkspaceTestCase):
             os.environ.pop("ALOCACAO_DATA_DIR", None)
             with patch.object(executar, "pasta_gravavel", return_value=False):
                 destino = executar.default_data_dir()
-        esperado = perfil / "UniCesumar" / "AlocacaoDocente" / f"v{executar.VERSION}"
+        esperado = perfil / "Institution" / "AlocacaoDocente" / f"v{executar.VERSION}"
         self.assertEqual(esperado, destino)
 
     def test_pasta_gravavel_avalia_sem_criar_a_pasta(self):

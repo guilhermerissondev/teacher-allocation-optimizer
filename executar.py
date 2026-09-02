@@ -18,7 +18,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = PACKAGE_ROOT / "backend"
 # Local usado pelas versões anteriores, mantido apenas para avisar o usuário
 # de que os dados antigos continuam lá quando ele abre esta versão.
-DADOS_LEGADOS = ("UniCesumar", "AlocacaoDocente", "vbeta1.0")
+DADOS_LEGADOS = ("Institution", "AlocacaoDocente", "vbeta1.0")
 VERSION = (PACKAGE_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
@@ -77,7 +77,7 @@ def data_dir_do_perfil() -> Path:
     """Alternativa quando a pasta do pacote não aceita escrita."""
     local_app_data = os.environ.get("LOCALAPPDATA")
     if os.name == "nt" and local_app_data:
-        return Path(local_app_data) / "UniCesumar" / "AlocacaoDocente" / f"v{VERSION}"
+        return Path(local_app_data) / "Institution" / "AlocacaoDocente" / f"v{VERSION}"
     return Path.home() / ".alocacao-docente" / f"v{VERSION}"
 
 

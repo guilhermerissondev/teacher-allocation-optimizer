@@ -108,7 +108,7 @@ O diretório deve ser estável e possuir permissão de leitura e escrita. O padr
 
     <pasta onde a aplicação foi aberta>\data
 
-Quando essa pasta não aceita escrita, a aplicação recorre a %LOCALAPPDATA%\UniCesumar\AlocacaoDocente\v<versão>. ALOCACAO_DATA_DIR e --dados substituem os dois. O conteúdo operacional gravado ali não integra o MANIFESTO_RELEASE.json nem o ZIP da release.
+Quando essa pasta não aceita escrita, a aplicação recorre a %LOCALAPPDATA%\Institution\AlocacaoDocente\v<versão>. ALOCACAO_DATA_DIR e --dados substituem os dois. O conteúdo operacional gravado ali não integra o MANIFESTO_RELEASE.json nem o ZIP da release.
 
 ## Estados
 
